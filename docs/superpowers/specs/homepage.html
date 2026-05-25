@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>统一私信框架 · 首页看板</title>
+<style>
+:root{--bg:#0f172a;--srf:#1e293b;--bd:#334155;--tx:#e2e8f0;--mu:#94a3b8;--ac:#38bdf8;--gn:#4ade80;--am:#fbbf24;--rd:#f87171;--pu:#a78bfa}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--tx);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:40px}
+.container{width:100%;max-width:1000px}
+h1{font-size:24px;font-weight:700;margin-bottom:4px}
+.sub{color:var(--mu);font-size:13px;margin-bottom:28px}
+
+/* task grid */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+
+/* card */
+.card{background:var(--srf);border:1px solid var(--bd);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s;position:relative}
+.card:hover{border-color:var(--ac);box-shadow:0 0 20px rgba(56,189,248,.06)}
+.card.running{border-color:var(--ac)}
+.card.paused{border-color:var(--am)}
+.card.empty{border:1px dashed var(--bd);cursor:pointer;display:flex;align-items:center;justify-content:center;min-height:210px;flex-direction:column;gap:8px;color:var(--mu)}
+.card.empty:hover{border-color:var(--mu)}
+
+/* card header */
+.ch{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.ch .name{font-size:16px;font-weight:600}
+.ch .status{font-size:11px;padding:4px 10px;border-radius:20px;font-weight:600}
+.st-run{background:rgba(74,222,128,.12);color:var(--gn)}
+.st-pause{background:rgba(251,191,36,.12);color:var(--am)}
+.st-idle{background:rgba(148,163,184,.12);color:var(--mu)}
+.st-err{background:rgba(248,113,113,.12);color:var(--rd)}
+
+/* progress bar */
+.pb-bg{background:var(--bg);border-radius:5px;height:8px;margin:14px 0 10px;overflow:hidden}
+.pb-fg{background:var(--ac);height:100%;border-radius:5px;transition:width .3s}
+.pb-fg.done{background:var(--gn)}
+.pb-fg.paused{background:var(--am)}
+
+/* stats row */
+.stats{display:flex;gap:16px;font-size:13px;margin-bottom:10px}
+.stats span{color:var(--mu)}
+.stats b{color:var(--tx);font-weight:600}
+.stat-ok{color:var(--gn) !important}.stat-fail{color:var(--rd) !important}
+
+/* meta tags */
+.meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.meta .mt{font-size:10px;padding:3px 8px;border-radius:4px;background:rgba(255,255,255,.04);color:var(--mu)}
+.meta .mt.hl{background:rgba(56,189,248,.1);color:var(--ac)}
+
+/* actions */
+.actions{display:flex;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.06)}
+.btn{font-size:11px;padding:5px 14px;border-radius:6px;font-weight:600;cursor:pointer;border:none;transition:all .15s}
+.btn-start{background:var(--gn);color:#0f172a}
+.btn-pause{background:var(--am);color:#0f172a}
+.btn-stop{background:var(--rd);color:#fff}
+.btn-detail{background:transparent;border:1px solid var(--bd);color:var(--tx)}
+.btn:hover{filter:brightness(1.15)}
+.btn:active{transform:scale(0.97)}
+
+/* empty card */
+.empty-icon{font-size:36px;opacity:.3}
+
+/* modal overlay */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal{background:var(--srf);border:1px solid var(--bd);border-radius:16px;padding:28px;width:90%;max-width:480px}
+.modal h3{font-size:18px;margin-bottom:16px}
+.modal label{font-size:12px;color:var(--mu);display:block;margin:10px 0 4px}
+.modal input,.modal select{width:100%;background:var(--bg);border:1px solid var(--bd);color:var(--tx);padding:8px 12px;border-radius:6px;font-size:13px}
+.modal .btn-row{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
+.hidden{display:none !important}
+</style>
+</head>
+<body onload="init()">
+<div class="container">
+
+<h1>📊 截流看板</h1>
+<p class="sub">2026年5月25日 周日 14:32 · 今日累计已发 <b style="color:var(--gn)">412</b> 条私信</p>
+
+<!-- task grid -->
+<div class="grid" id="taskGrid"></div>
+
+</div>
+
+<!-- ADD APP MODAL -->
+<div class="modal-overlay hidden" id="addAppModal">
+<div class="modal">
+<h3>添加新 App</h3>
+<label>App 名称</label><input id="newAppName" placeholder="例如：漂漂、梦音">
+<label>包名</label><input id="newAppPkg" placeholder="例如：com.example.app">
+<label>私信方式</label>
+<select id="newAppMode"><option value="rest">REST API</option><option value="frida_nim">Frida NIM</option><option value="none">纯浏览（不发送）</option></select>
+<div class="btn-row">
+  <div class="btn btn-detail" onclick="toggleModal()">取消</div>
+  <div class="btn btn-start" onclick="addApp()">确认添加</div>
+</div>
+</div></div>
+
+<!-- CONFIG MODAL -->
+<div class="modal-overlay hidden" id="configModal">
+<div class="modal" id="configContent"></div>
+</div>
+
+<script>
+var apps = [
+  {
+    id: "piaopiao", name: "漂漂", subtitle: "Popo Live",
+    status: "running", mode: "REST",
+    totalRooms: 192, doneRooms: 27, sent: 218, failed: 5,
+    interval: 3, currentRoom: "CarpeDiem",
+    dataSource: "贡献榜", period: "今日", gender: "全部"
+  },
+  {
+    id: "mengyin", name: "梦音", subtitle: "Mengyin",
+    status: "paused", mode: "Frida",
+    totalRooms: 19, doneRooms: 12, sent: 94, failed: 1,
+    interval: 5, currentRoom: "西柚音乐厅",
+    dataSource: "财富榜", period: "本周", gender: "男神"
+  },
+  {
+    id: "shuangyu", name: "双鱼部落", subtitle: "Shuangyu",
+    status: "idle", mode: "Frida",
+    totalRooms: 45, doneRooms: 0, sent: 0, failed: 0,
+    interval: 4, currentRoom: null,
+    dataSource: "贡献榜", period: "今日", gender: "男"
+  },
+  { id: "empty", type: "empty" }
+];
+
+function init() {
+  render();
+  document.getElementById('taskGrid').addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var act = btn.dataset.action;
+    var appId = btn.dataset.appid;
+    if (act === 'start') startTask(appId);
+    if (act === 'pause') pauseTask(appId);
+    if (act === 'stop') stopTask(appId);
+    if (act === 'detail') showDetail(appId);
+    if (act === 'config') showConfig(appId);
+    e.stopPropagation();
+  });
+}
+
+function render() {
+  var html = '';
+  apps.forEach(function(app) {
+    if (app.type === 'empty') {
+      html += '<div class="card empty" onclick="toggleModal()" data-action="add">'
+        + '<div class="empty-icon">＋</div>'
+        + '<div style="font-size:14px">添加新 App</div>'
+        + '<div style="font-size:11px">支持 REST / Frida NIM 模式</div>'
+        + '</div>';
+      return;
+    }
+    var pct = app.totalRooms ? Math.round(app.doneRooms / app.totalRooms * 100) : 0;
+    var stCls = app.status === 'running' ? 'st-run' : (app.status === 'paused' ? 'st-pause' : 'st-idle');
+    var stLabel = app.status === 'running' ? '● 运行中' : (app.status === 'paused' ? '⏸ 暂停' : '○ 待开始');
+    var borderCls = app.status === 'running' ? 'running' : (app.status === 'paused' ? 'paused' : '');
+    var pbCls = pct === 100 ? 'done' : (app.status === 'paused' ? 'paused' : '');
+    var roomLabel = app.status === 'running' ? ('当前: ' + app.currentRoom) : (app.status === 'paused' ? ('停在: ' + app.currentRoom) : '');
+    html += '<div class="card ' + borderCls + '">'
+      + '<div class="ch">'
+        + '<div class="name">🎤 ' + app.name + ' <span style="font-size:11px;color:var(--mu);font-weight:400">' + app.subtitle + '</span></div>'
+        + '<div class="status ' + stCls + '">' + stLabel + '</div>'
+      + '</div>'
+      + '<div class="pb-bg"><div class="pb-fg ' + pbCls + '" style="width:' + pct + '%"></div></div>'
+      + '<div class="stats">'
+        + '<span>房间 <b>' + app.doneRooms + '/' + app.totalRooms + '</b></span>'
+        + '<span>已发 <b class="stat-ok">' + app.sent + '</b></span>'
+        + '<span>失败 <b class="stat-fail">' + app.failed + '</b></span>'
+      + '</div>'
+      + (roomLabel ? ('<div style="font-size:11px;color:var(--mu);margin-bottom:6px">' + roomLabel + '</div>') : '')
+      + '<div class="meta">'
+        + '<span class="mt hl">' + app.mode + '</span>'
+        + '<span class="mt">间隔 ' + app.interval + 's</span>'
+        + '<span class="mt">' + app.dataSource + '</span>'
+        + '<span class="mt">' + app.period + '</span>'
+        + '<span class="mt">' + app.gender + '</span>'
+      + '</div>'
+      + '<div class="actions">';
+    if (app.status === 'idle') {
+      html += '<div class="btn btn-start" data-action="start" data-appid="' + app.id + '">▶ 开始群发</div>';
+    } else if (app.status === 'running') {
+      html += '<div class="btn btn-pause" data-action="pause" data-appid="' + app.id + '">⏸ 暂停</div>';
+      html += '<div class="btn btn-stop" data-action="stop" data-appid="' + app.id + '">⬛ 停止</div>';
+    } else if (app.status === 'paused') {
+      html += '<div class="btn btn-start" data-action="start" data-appid="' + app.id + '">▶ 继续</div>';
+      html += '<div class="btn btn-stop" data-action="stop" data-appid="' + app.id + '">⬛ 停止</div>';
+    }
+    html += '<div class="btn btn-detail" data-action="detail" data-appid="' + app.id + '">📋 详情</div>';
+    html += '<div class="btn btn-detail" data-action="config" data-appid="' + app.id + '">⚙ 设置</div>';
+    html += '</div></div>';
+  });
+  document.getElementById('taskGrid').innerHTML = html;
+}
+
+function startTask(id) {
+  var app = apps.find(function(a) { return a.id === id; });
+  if (!app) return;
+  app.status = 'running';
+  render();
+}
+
+function pauseTask(id) {
+  var app = apps.find(function(a) { return a.id === id; });
+  if (!app) return;
+  app.status = 'paused';
+  render();
+}
+
+function stopTask(id) {
+  var app = apps.find(function(a) { return a.id === id; });
+  if (!app) return;
+  app.status = 'idle';
+  app.doneRooms = 0; app.sent = 0; app.failed = 0;
+  app.currentRoom = null;
+  render();
+}
+
+function showDetail(id) {
+  var app = apps.find(function(a) { return a.id === id; });
+  if (!app) return;
+  alert('[DEMO] 跳转到 /app/' + app.id + ' 任务详情页\n\n'
+    + '该页面显示当前房间实时排行、发送日志、\n话术模板、今日统计等完整信息。\n\n'
+    + '（完整面板请见 design-mockup.html Section 3）');
+}
+
+function showConfig(id) {
+  var app = apps.find(function(a) { return a.id === id; });
+  if (!app) return;
+  var html = '<h3>⚙ ' + app.name + ' 设置</h3>'
+    + '<label>发信间隔（秒）</label><input value="' + app.interval + '" type="number">'
+    + '<label>数据源</label><select><option>' + app.dataSource + '</option></select>'
+    + '<label>时段</label><select><option>' + app.period + '</option></select>'
+    + '<label>性别</label><select><option>' + app.gender + '</option></select>'
+    + '<label>话术模板（一行一条，{nick}=昵称）</label>'
+    + '<textarea style="width:100%;height:80px;background:var(--bg);border:1px solid var(--bd);color:var(--tx);border-radius:6px;padding:8px;font-size:12px">{nick}你好，来我房间玩嘛~\n{nick}在吗？聊聊呀\n{nick}哈喽~</textarea>'
+    + '<div class="btn-row"><div class="btn btn-detail" onclick="document.getElementById(\'configModal\').classList.add(\'hidden\')">关闭</div><div class="btn btn-start" onclick="document.getElementById(\'configModal\').classList.add(\'hidden\')">保存</div></div>';
+  document.getElementById('configContent').innerHTML = html;
+  document.getElementById('configModal').classList.remove('hidden');
+}
+
+function toggleModal() {
+  document.getElementById('addAppModal').classList.toggle('hidden');
+}
+
+function addApp() {
+  var name = document.getElementById('newAppName').value || '新 App';
+  var mode = document.getElementById('newAppMode').value;
+  var id = 'app' + Date.now();
+  apps.splice(apps.length - 1, 0, {
+    id: id, name: name, subtitle: '待配置',
+    status: 'idle', mode: mode === 'frida_nim' ? 'Frida' : 'REST',
+    totalRooms: 0, doneRooms: 0, sent: 0, failed: 0,
+    interval: 4, currentRoom: null,
+    dataSource: '贡献榜', period: '今日', gender: '全部'
+  });
+  toggleModal();
+  render();
+}
+
+document.getElementById('addAppModal').addEventListener('click', function(e) {
+  if (e.target === document.getElementById('addAppModal')) toggleModal();
+});
+document.getElementById('configModal').addEventListener('click', function(e) {
+  if (e.target === document.getElementById('configModal')) document.getElementById('configModal').classList.add('hidden');
+});
+</script>
+</body>
+</html>
