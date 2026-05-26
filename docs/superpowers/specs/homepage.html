@@ -506,18 +506,7 @@ function stopTask(id) {
 function refreshAll() { fetchApps(); toast('已刷新'); }
 
 function showDetail(id) {
-  var a = apps.find(function(x){return x.id===id}); if (!a) return;
-  document.getElementById('detailContent').innerHTML =
-    '<h3>'+a.name+' 任务详情</h3>'
-    +'<div style="font-size:13px;color:var(--text-muted);margin-bottom:18px">'
-    +'状态: <b style="color:var(--text)">'+(a.status==='running'?'运行中':(a.status==='paused'?'已暂停':'待开始'))+'</b> &middot; '
-    +'进度: '+a.doneRooms+'/'+a.totalRooms+' 间 &middot; '
-    +'已发: <b style="color:var(--success)">'+a.sent+'</b> &middot; '
-    +'失败: <b style="color:var(--danger)">'+a.failed+'</b></div>'
-    +'<div style="padding:28px;text-align:center;color:var(--text-muted);background:rgba(0,0,0,0.02);border:1px solid var(--border);border-radius:12px">'
-    +'完整详情页（排行列表 / 发送日志 / 话术模板）<br>请见 <b style="color:var(--accent)">design-mockup.html</b></div>'
-    +'<div class="btn-row"><div class="btn btn-ghost" onclick="closeDetailModal()">关闭</div></div>';
-  document.getElementById('detailModal').classList.remove('hidden');
+  window.location.href = '/app/' + encodeURIComponent(id);
 }
 function showConfig(id) {
   var a = apps.find(function(x){return x.id===id}); if (!a) return;
