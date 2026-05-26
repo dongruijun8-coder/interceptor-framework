@@ -1,21 +1,21 @@
 """BaseClient — Pipeline 核心 + HTTP 封装。App 继承后实现 3 个方法。"""
 import json
 import random
+import threading
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
 
 import requests
 import urllib3
 
 from .state_manager import StateManager
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 
 class BaseClient(ABC):
     def __init__(self, config_path: str):
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
         self.config_path = Path(config_path)
         self.config = json.loads(self.config_path.read_text(encoding="utf-8"))
         self.app_name = self.config["app_name"]
@@ -25,7 +25,9 @@ class BaseClient(ABC):
         self.session.verify = False
         self._authenticated = False
         self._running = False
-        self._paused = False
+        self._pause_event = threading.Event()
+        self._pause_event.set()
+        self._lock = threading.Lock()
         self._interval = self.config.get("send_interval", 3)
         self._templates = self.config.get("templates", ["{nick} 你好~"])
         self._period = self.config.get("period", "今日")
@@ -81,39 +83,47 @@ class BaseClient(ABC):
 
     def _post(self, url: str, body: dict) -> dict:
         r = self.session.post(url, json=body, headers=self.build_headers(), timeout=30)
+        r.raise_for_status()
         return r.json()
 
     def _get(self, url: str, params: dict = None) -> dict:
         r = self.session.get(url, params=params, headers=self.build_headers(), timeout=30)
+        r.raise_for_status()
         return r.json()
 
     # ═══ Pipeline ═══
 
     def run_pipeline(self) -> None:
         self._running = True
-        self._paused = False
+        self._pause_event.set()
 
         if not self._authenticated:
             if not self.authenticate():
                 self._notify("error", "认证失败")
+                self._running = False
                 return
             self._authenticated = True
 
         self._rooms = self.state.load_rooms()
         if not self._rooms:
             self._notify("info", "扫描房间...")
-            self._rooms = self.fetch_all_rooms()
+            try:
+                self._rooms = self.fetch_all_rooms()
+            except Exception as e:
+                self._notify("error", f"扫描房间失败: {e}")
+                self._running = False
+                return
             self.state.save_rooms(self._rooms)
             self._notify("info", f"扫描完成: {len(self._rooms)} 间房")
 
-        self._progress = self.state.load_progress()
-        start_idx = self._progress.get("current_room_index", 0)
+        with self._lock:
+            self._progress = self.state.load_progress()
+            start_idx = self._progress.get("current_room_index", 0)
 
         for idx in range(start_idx, len(self._rooms)):
             if not self._running:
                 break
-            while self._paused and self._running:
-                time.sleep(0.5)
+            self._pause_event.wait()
             if not self._running:
                 break
             room = self._rooms[idx]
@@ -126,10 +136,11 @@ class BaseClient(ABC):
         self._running = False
 
     def run_room(self, room: dict, idx: int) -> None:
-        self.state.save_progress(
-            current_room_index=idx,
-            current_room_name=room.get("name", ""),
-        )
+        with self._lock:
+            self.state.save_progress(
+                current_room_index=idx,
+                current_room_name=room.get("name", ""),
+            )
 
         try:
             users = self.fetch_room_ranking(room, self._period)
@@ -148,8 +159,7 @@ class BaseClient(ABC):
         for user in users:
             if not self._running:
                 break
-            while self._paused and self._running:
-                time.sleep(0.5)
+            self._pause_event.wait()
             if not self._running:
                 break
 
@@ -162,18 +172,23 @@ class BaseClient(ABC):
             template = random.choice(self._templates)
             text = template.replace("{nick}", nick).replace("{room_name}", room.get("name", ""))
 
-            result = self.send_message(uid, text)
+            try:
+                result = self.send_message(uid, text)
+            except Exception as e:
+                result = {"success": False, "error": str(e)}
 
             if result.get("success"):
                 self.state.mark_sent(uid, nick, room.get("name", ""))
-                sent = self._progress.get("sent_total", 0) + 1
-                self._progress["sent_total"] = sent
-                self.state.save_progress(sent_total=sent)
+                with self._lock:
+                    sent = self._progress.get("sent_total", 0) + 1
+                    self._progress["sent_total"] = sent
+                    self.state.save_progress(sent_total=sent)
                 self._notify("sent", {"uid": uid, "nick": nick, "text": text})
             else:
-                failed = self._progress.get("failed_total", 0) + 1
-                self._progress["failed_total"] = failed
-                self.state.save_progress(failed_total=failed)
+                with self._lock:
+                    failed = self._progress.get("failed_total", 0) + 1
+                    self._progress["failed_total"] = failed
+                    self.state.save_progress(failed_total=failed)
                 self._notify("failed", {
                     "uid": uid, "nick": nick,
                     "error": result.get("error", "unknown"),
@@ -184,38 +199,38 @@ class BaseClient(ABC):
     # ═══ 控制 ═══
 
     def start(self) -> None:
-        import threading
         t = threading.Thread(target=self.run_pipeline, daemon=True)
         t.start()
 
     def pause(self) -> None:
-        self._paused = True
+        self._pause_event.clear()
 
     def resume(self) -> None:
-        self._paused = False
+        self._pause_event.set()
 
     def stop(self) -> None:
         self._running = False
-        self._paused = False
+        self._pause_event.set()
 
     @property
     def status(self) -> str:
         if not self._running:
             return "idle"
-        if self._paused:
+        if not self._pause_event.is_set():
             return "paused"
         return "running"
 
     def get_stats(self) -> dict:
-        rooms = self._rooms
-        progress = self._progress
+        with self._lock:
+            progress = dict(self._progress)
+            rooms = list(self._rooms)
         total_rooms = len(rooms)
-        done = progress.get("current_room_index", 0)
+        current_idx = progress.get("current_room_index", 0)
         return {
             "app_name": self.app_name,
             "status": self.status,
             "total_rooms": total_rooms,
-            "done_rooms": min(done, total_rooms),
+            "done_rooms": current_idx,
             "sent": progress.get("sent_total", 0),
             "failed": progress.get("failed_total", 0),
             "current_room": progress.get("current_room_name", ""),
