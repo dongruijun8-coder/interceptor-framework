@@ -4,6 +4,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request
 
+from .account_manager import AccountManager
 from .task_manager import TaskManager
 
 app = Flask(__name__)
@@ -14,8 +15,10 @@ SPEC_DIR = (Path(__file__).resolve().parent.parent.parent
 HOMEPAGE_HTML = SPEC_DIR / "homepage.html"
 DETAIL_HTML = SPEC_DIR / "design-mockup.html"
 
+APPS_DIR = Path(__file__).resolve().parent.parent.parent / "apps"
 
-# ═══ API ═══
+
+# ═══ Task API ═══
 
 @app.route("/api/apps")
 def api_apps():
@@ -51,6 +54,80 @@ def api_stop(app_id):
 @app.route("/api/app/<app_id>/rescan", methods=["POST"])
 def api_rescan(app_id):
     ok = manager.rescan_rooms(app_id)
+    return jsonify({"success": ok})
+
+
+# ═══ Account API ═══
+
+def _get_account_manager(app_id: str) -> AccountManager:
+    app_dir = APPS_DIR / app_id
+    if not app_dir.exists():
+        app_dir.mkdir(parents=True, exist_ok=True)
+    return AccountManager(str(app_dir))
+
+
+@app.route("/api/app/<app_id>/accounts")
+def api_accounts(app_id):
+    am = _get_account_manager(app_id)
+    accounts = am.load_accounts()
+    active = am.get_active_account()
+    return jsonify({
+        "accounts": accounts,
+        "active_uid": active["uid"] if active else None,
+    })
+
+
+@app.route("/api/app/<app_id>/accounts/login", methods=["POST"])
+def api_accounts_login(app_id):
+    data = request.get_json() or {}
+    phone = data.get("phone", "").strip()
+    sms_code = data.get("sms_code", "").strip()
+    if not phone or not sms_code:
+        return jsonify({"success": False, "error": "手机号和验证码不能为空"}), 400
+
+    # Load app config for API details
+    config_path = APPS_DIR / app_id / "config.json"
+    if not config_path.exists():
+        return jsonify({"success": False, "error": "App 配置不存在"}), 404
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    base_url = config.get("base_url", "")
+    if not base_url:
+        return jsonify({"success": False, "error": "config.json 缺少 base_url"}), 400
+
+    am = _get_account_manager(app_id)
+    result = am.sms_login(base_url, phone, sms_code, config)
+
+    if result.get("success"):
+        # Update config.json with fresh token
+        config["token"] = result["token"]
+        config["uid"] = result["uid"]
+        config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return jsonify(result)
+
+
+@app.route("/api/app/<app_id>/accounts/<uid>", methods=["DELETE"])
+def api_accounts_remove(app_id, uid):
+    am = _get_account_manager(app_id)
+    ok = am.remove_account(uid)
+    return jsonify({"success": ok})
+
+
+@app.route("/api/app/<app_id>/accounts/<uid>/activate", methods=["POST"])
+def api_accounts_activate(app_id, uid):
+    am = _get_account_manager(app_id)
+    ok = am.activate_account(uid)
+    if ok:
+        # Update config.json with activated account
+        active = am.get_active_account()
+        if active:
+            config_path = APPS_DIR / app_id / "config.json"
+            if config_path.exists():
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                config["token"] = active["token"]
+                config["uid"] = active["uid"]
+                config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
     return jsonify({"success": ok})
 
 
