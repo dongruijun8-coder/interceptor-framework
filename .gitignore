@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# State files (每 App 独立状态目录)
+.state/
+
+# API keys & secrets
+.env
+*.env.local
+
+# mitmproxy dumps
+*.mitm
+flow/

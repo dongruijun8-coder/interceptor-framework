@@ -1,317 +1,400 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>统一私信框架 — 完整设计</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>截流看板 · 任务详情 · 漂漂</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0f172a;--srf:#1e293b;--bd:#334155;--tx:#e2e8f0;--mu:#94a3b8;--ac:#38bdf8;--gn:#4ade80;--am:#fbbf24;--pu:#a78bfa;--rd:#f87171;--pk:#f472b6;-or:#fb923c}
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--tx);padding:32px;line-height:1.6}
-h1{font-size:26px;font-weight:700;margin-bottom:4px}
-h2{font-size:19px;font-weight:600;margin:36px 0 16px;padding-bottom:8px;border-bottom:1px solid var(--bd)}
-h3{font-size:15px;font-weight:600;margin:12px 0 8px}
-.sub{color:var(--mu);font-size:14px;margin-bottom:20px}
-.card{background:var(--srf);border:1px solid var(--bd);border-radius:10px;padding:20px;margin-bottom:14px}
-.row{display:flex;gap:14px;flex-wrap:wrap}
-.row>.card{flex:1;min-width:240px}
-.code{background:#0c1222;border:1px solid var(--bd);border-radius:6px;padding:12px 16px;font-family:'Cascadia Code',monospace;font-size:12px;white-space:pre;color:#c9d1d9;overflow-x:auto;line-height:1.65}
-.cm{color:#8b949e}.kw{color:#ff7b72}.st{color:#a5d6ff}.fn{color:#d2a8ff}.hl{color:var(--gn)}
-.tree{font-family:'Cascadia Code',monospace;font-size:13px;line-height:1.9}
-.tree .d{color:var(--ac)}.tree .f{color:var(--tx)}.tree .cm2{color:var(--mu)}
-table{width:100%;border-collapse:collapse;font-size:13px}thead{background:var(--srf)}
-th{padding:8px 12px;text-align:left;color:var(--mu);font-weight:600;font-size:11px}
-td{padding:8px 12px;border-bottom:1px solid var(--bd)}
-.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-right:4px}
-.t0{background:rgba(168,85,247,.15);color:var(--pu)}.t1{background:rgba(74,222,128,.15);color:var(--gn)}.t2{background:rgba(251,191,36,.15);color:var(--am)}.t3{background:rgba(244,114,182,.15);color:var(--pk)}.t4{background:rgba(251,146,60,.15);color:var(--or)}
+:root {
+  --bg: #080C14;
+  --surface: #111827;
+  --surface-2: #1A2332;
+  --border: #1E2D3D;
+  --primary: #3B82F6;
+  --primary-muted: rgba(59,130,246,.12);
+  --accent: #F59E0B;
+  --accent-muted: rgba(245,158,11,.12);
+  --success: #22C55E;
+  --success-muted: rgba(34,197,94,.12);
+  --danger: #EF4444;
+  --danger-muted: rgba(239,68,68,.12);
+  --text: #E2E8F0;
+  --text-muted: #94A3B8;
+  --text-inverse: #0F172A;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --font-mono: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --font-sans: 'Fira Sans', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', 'Segoe UI', system-ui, sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display:flex; flex-direction:column;
+  -webkit-font-smoothing: antialiased;
+}
 
-/* Pipeline */
-.pipe{display:flex;flex-direction:column;gap:0;margin:16px 0}
-.pipe-row{display:flex;align-items:center;gap:0;font-size:14px}
-.ps{flex:1;background:var(--srf);border:1px solid var(--bd);padding:10px 12px;text-align:center;border-radius:8px}
-.ps.ac{border-color:var(--ac);background:rgba(56,189,248,.08)}
-.pa{color:var(--mu);font-size:18px;padding:0 4px}
-.pl{background:var(--bg);border:2px dashed var(--am);border-radius:10px;padding:10px 16px;margin-top:10px}
-.pll{font-size:12px;color:var(--am);margin-bottom:6px;font-weight:600}
+/* ═══ Top Bar ═══ */
+.topbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px; height: 52px;
+  display:flex; align-items:center; justify-content:space-between;
+  flex-shrink:0;
+}
+.topbar .back {
+  display:flex; align-items:center; gap:6px;
+  font-size: 13px; color: var(--text-muted); cursor:pointer; font-weight:500;
+  transition: color .15s; background:none; border:none;
+}
+.topbar .back:hover { color: var(--text); }
+.topbar .back svg { width: 16px; height: 16px; }
+.topbar .title { font-family: var(--font-mono); font-size: 14px; font-weight:600; }
+.topbar .title .status-dot { width: 7px; height: 7px; border-radius: 50%; display:inline-block; margin-right:6px; }
+.topbar .title .dot-run { background: var(--success); animation: pulse 2s infinite; }
+.topbar .title .dot-pause { background: var(--accent); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+.topbar .right { display:flex; gap:10px; align-items:center; }
 
-/* task cards */
-.task-cards{display:flex;gap:14px;flex-wrap:wrap}
-.task-card{flex:1;min-width:260px;max-width:380px;background:var(--srf);border:1px solid var(--bd);border-radius:12px;padding:16px;cursor:pointer;transition:border-color .2s}
-.task-card:hover{border-color:var(--ac)}
-.tc-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-.tc-name{font-size:15px;font-weight:600}
-.tc-status{font-size:10px;padding:3px 8px;border-radius:8px}
-.tc-running{background:rgba(74,222,128,.12);color:var(--gn)}.tc-idle{background:rgba(148,163,184,.12);color:var(--mu)}.tc-error{background:rgba(248,113,113,.12);color:var(--rd)}
-.tc-bar-bg{background:var(--bg);border-radius:4px;height:6px;margin:8px 0;overflow:hidden}
-.tc-bar-fg{background:var(--ac);height:100%;border-radius:4px;transition:width .3s}
-.tc-stats{font-size:11px;color:var(--mu);display:flex;gap:12px;margin-top:6px}
-.tc-stats span b{color:var(--tx)}
-.tc-meta{font-size:10px;color:var(--mu);margin-top:6px;display:flex;gap:8px}
+/* ═══ Layout ═══ */
+.main { display:flex; flex:1; overflow:hidden; }
+.panel {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow-y:auto; overflow-x:hidden;
+  flex-shrink:0;
+}
+.panel:last-child { border-right:none; }
 
-/* detail page */
-.back-link{font-size:12px;color:var(--ac);cursor:pointer;margin-bottom:12px;display:inline-block}
+.panel-left   { width: 260px; }
+.panel-center { flex:1; min-width:0; }
+.panel-right  { width: 320px; }
 
-/* Dashboard */
-.dash{background:var(--srf);border:1px solid var(--bd);border-radius:12px;overflow:hidden}
-.dt{display:flex;align-items:center;gap:10px;padding:10px 16px;background:rgba(255,255,255,.03);border-bottom:1px solid var(--bd);flex-wrap:wrap}
-.dt select{background:var(--bg);border:1px solid var(--bd);color:var(--tx);padding:5px 10px;border-radius:6px;font-size:12px}
-.db{display:flex;min-height:420px}
-.dl{width:250px;border-right:1px solid var(--bd);padding:10px}
-.dm{flex:1;padding:14px}
-.dr{width:280px;border-left:1px solid var(--bd);padding:10px}
-.secl{font-size:10px;text-transform:uppercase;color:var(--mu);margin:8px 0 3px;padding:0 3px;letter-spacing:0.5px}
-.sr{padding:6px 7px;border-radius:5px;font-size:11px;display:flex;justify-content:space-between;margin-bottom:1px}
-.sr.sel{border-left:3px solid var(--ac);background:rgba(56,189,248,.06)}
-.sr .st{font-size:9px;padding:1px 5px;border-radius:3px}
-.ss{background:rgba(74,222,128,.12);color:var(--gn)}.sw{background:rgba(251,191,36,.12);color:var(--am)}.se{background:rgba(148,163,184,.12);color:var(--mu)}
-.ur{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px}
-.ur .rk{width:22px;color:var(--mu)}
-.ur .sk{text-decoration:line-through;color:var(--mu)}
-.tab-row{display:flex;margin-bottom:8px}
-.tab{padding:4px 12px;font-size:11px;border-bottom:2px solid transparent;color:var(--mu)}
-.tab.act{color:var(--tx);border-bottom-color:var(--ac)}
-.logl{font-size:10px;color:var(--mu);padding:1px 0;line-height:1.5}
-.set-bar{display:flex;align-items:center;gap:8px;padding:8px 0;flex-wrap:wrap;font-size:11px}
-.set-bar label{color:var(--mu)}
-.set-bar input{background:var(--bg);border:1px solid var(--bd);color:var(--tx);padding:3px 6px;border-radius:4px;width:50px;font-size:11px}
-.set-bar select{background:var(--bg);border:1px solid var(--bd);color:var(--tx);padding:3px 6px;border-radius:4px;font-size:11px}
-.files{display:flex;gap:10px;margin-top:6px}
-.fc{border:1px solid var(--bd);border-radius:8px;padding:10px;font-size:11px;flex:1}
-.fc .fn{font-family:'Cascadia Code',monospace;color:var(--ac);margin-bottom:4px;font-size:12px}
-.fc .desc{color:var(--mu)}
+.panel-header {
+  font-family: var(--font-mono); font-size: 12px; font-weight:600;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing:.5px;
+  padding: 16px 20px 10px;
+  border-bottom: 1px solid var(--border);
+  display:flex; align-items:center; justify-content:space-between;
+}
+.panel-header .count { font-size: 11px; color: var(--text-muted); font-weight:400; }
 
-/* scrollbar */
-::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
+/* ═══ Left: Room List ═══ */
+.room-item {
+  padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,.03);
+  display:flex; align-items:center; justify-content:space-between;
+  transition: background .15s; cursor:pointer;
+}
+.room-item:hover { background: var(--surface-2); }
+.room-item.active { background: var(--primary-muted); border-left: 2px solid var(--primary); padding-left:18px; }
+.room-item .ri-name { font-size: 13px; font-weight:500; }
+.room-item .ri-meta { font-size: 11px; color: var(--text-muted); margin-top:2px; }
+.room-item .ri-badge {
+  font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight:600;
+  white-space:nowrap; flex-shrink:0;
+}
+.room-done { background: var(--success-muted); color: var(--success); }
+.room-prog { background: var(--primary-muted); color: var(--primary); }
+.room-wait { color: var(--text-muted); }
+
+.room-list-footer { padding:12px 20px; text-align:center; }
+.room-list-footer a { font-size:12px; color:var(--primary); cursor:pointer; text-decoration:none; }
+.room-list-footer a:hover { text-decoration:underline; }
+
+/* ═══ Center: Ranking List ═══ */
+.ranking-table { width:100%; border-collapse:collapse; font-size:13px; }
+.ranking-table th {
+  text-align:left; padding:10px 16px; font-size:11px; font-weight:600;
+  color: var(--text-muted); text-transform:uppercase; letter-spacing:.3px;
+  border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--surface); z-index:1;
+}
+.ranking-table td { padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,.03); }
+.ranking-table tr { transition: background .12s; }
+.ranking-table tbody tr:hover { background: var(--surface-2); }
+.ranking-table .rank-num { font-family: var(--font-mono); color: var(--text-muted); font-size:12px; width:40px; }
+.ranking-table .rank-num.top { color: var(--accent); font-weight:600; }
+.ranking-table .uid { font-family: var(--font-mono); font-size:11px; color: var(--text-muted); }
+.ranking-table .amount { font-family: var(--font-mono); font-size:12px; font-weight:500; text-align:right; }
+
+.row-sent { opacity: .35; }
+.row-sent td { text-decoration: line-through; text-decoration-color: var(--success); }
+.row-fail { background: rgba(239,68,68,.04); }
+.row-fail td { color: var(--danger); }
+.row-sending td { background: var(--primary-muted); }
+
+.status-tag {
+  font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight:600; white-space:nowrap;
+}
+.tag-sent  { background: var(--success-muted); color: var(--success); }
+.tag-fail  { background: var(--danger-muted); color: var(--danger); }
+.tag-skip  { background: rgba(148,163,184,.08); color: var(--text-muted); }
+
+.ranking-empty { padding: 40px; text-align:center; color: var(--text-muted); font-size:13px; }
+
+/* ═══ Right: Send Panel ═══ */
+.send-section { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.send-section h4 { font-family:var(--font-mono); font-size:12px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:12px; }
+
+.setting-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; font-size:13px; }
+.setting-row label { color: var(--text-muted); }
+.setting-row input, .setting-row select {
+  width: 120px; background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); padding: 5px 10px; border-radius: var(--radius-sm);
+  font-size: 12px; font-family: var(--font-sans);
+}
+.setting-row input:focus, .setting-row select:focus { outline:none; border-color:var(--primary); }
+
+.template-item {
+  font-size: 12px; padding: 6px 10px; background: var(--bg);
+  border-radius: var(--radius-sm); margin-bottom:6px;
+  cursor:pointer; transition: background .15s;
+  border:1px solid transparent;
+}
+.template-item:hover { border-color: var(--border); }
+.template-item .nick { color: var(--primary); }
+
+/* ═══ Log ═══ */
+.hidden { display:none !important; }
+.log-list { padding: 0; }
+.log-item {
+  padding: 8px 20px; border-bottom: 1px solid rgba(255,255,255,.02);
+  font-size: 12px; display:flex; gap:8px; align-items:flex-start;
+}
+.log-time { font-family:var(--font-mono); font-size:10px; color:var(--text-muted); white-space:nowrap; flex-shrink:0; }
+.log-ok .log-msg { color: var(--success); }
+.log-err .log-msg { color: var(--danger); }
+.log-info .log-msg { color: var(--text-muted); }
+.log-msg { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ═══ Buttons ═══ */
+.btn {
+  font-size: 12px; padding: 6px 14px; border-radius: var(--radius-sm);
+  font-weight: 600; cursor: pointer; border: none;
+  transition: all .15s; font-family: var(--font-sans);
+  display:inline-flex; align-items:center; gap:4px;
+}
+.btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.btn:active { transform: scale(0.97); }
+
+.btn-start  { background: var(--success); color: var(--text-inverse); }
+.btn-start:hover  { filter: brightness(1.1); }
+.btn-pause  { background: var(--accent); color: var(--text-inverse); }
+.btn-pause:hover  { filter: brightness(1.1); }
+.btn-stop   { background: var(--danger); color: #fff; }
+.btn-stop:hover   { filter: brightness(1.1); }
+.btn-ghost  { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-ghost:hover  { border-color: var(--text-muted); background: rgba(255,255,255,.03); }
+.btn-xs { font-size: 10px; padding: 3px 8px; }
+
+/* ═══ Progress Summary Bar ═══ */
+.progress-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 24px; display:flex; align-items:center; gap:16px;
+  flex-shrink:0; font-size: 13px;
+}
+.progress-bar .pb-track { flex:1; max-width:300px; background:var(--bg); border-radius:4px; height:6px; overflow:hidden; }
+.progress-bar .pb-fill { height:100%; border-radius:4px; background:var(--primary); transition:width .4s; }
+.progress-bar .pb-stat { font-family:var(--font-mono); font-size:12px; }
+.progress-bar .pb-stat .ok { color:var(--success); }
+.progress-bar .pb-stat .fl { color:var(--danger); }
+
+/* ═══ Scrollbar ═══ */
+.panel::-webkit-scrollbar { width: 4px; }
+.panel::-webkit-scrollbar-track { background: transparent; }
+.panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.panel::-webkit-scrollbar-thumb:hover { background: #2D4A6D; }
+
+/* ═══ Responsive ═══ */
+@media (max-width: 1024px) {
+  .main { flex-direction:column; }
+  .panel-left, .panel-right { width:100%; max-height:200px; border-right:none; border-bottom:1px solid var(--border); }
+  .panel-center { flex:1; }
+}
 </style>
 </head>
 <body>
-<div style="max-width:1150px;margin:0 auto">
 
-<h1>统一私信框架 <span style="font-size:16px;color:var(--mu);font-weight:400">— 完整设计 Mockup</span></h1>
-<p class="sub">B 方案 · 继承模式 · 逐房遍历 · 断点恢复 · 多任务并行 · 先做漂漂</p>
-
-<!-- ====== 1. OVERVIEW ====== -->
-<h2>1. 设计决策总览</h2>
-<table>
-<thead><tr><th>决策点</th><th>选择</th></tr></thead>
-<tbody>
-<tr><td>架构</td><td><span class="tag t0">B 方案</span> 继承模式：BaseClient 内置 Pipeline</td></tr>
-<tr><td>Pipeline</td><td><span class="tag t1">逐房遍历</span> 房间缓存 → 断点恢复 → 拉排行 → 过滤已发 → 逐人私信</td></tr>
-<tr><td>任务</td><td><span class="tag t4">多 App 并行</span> 浓缩看板 → 点击进入详情页</td></tr>
-<tr><td>数据源</td><td><span class="tag t1">贡献榜</span> 各 App config 声明时段/性别，Dashboard 动态渲染</td></tr>
-<tr><td>本地状态</td><td><span class="tag t0">3 个 JSON</span> rooms_cache / sent_today / progress</td></tr>
-<tr><td>认证</td><td><span class="tag t0">双模式</span> auto（登录）/ manual（填 token）</td></tr>
-<tr><td>错误处理</td><td><span class="tag t2">统一跳过下一间/下一人</span></td></tr>
-<tr><td>私信模式</td><td><span class="tag t1">3 种</span> rest / frida_nim / none</td></tr>
-</tbody></table>
-
-<!-- ====== 2. LANDING PAGE: TASK BOARD ====== -->
-<h2>2. 浓缩看板（首页）</h2>
-<p style="font-size:13px;color:var(--mu);margin-bottom:12px">启动后首页，一眼看到所有 App 任务状态。多 App 可同时运行。</p>
-
-<div class="task-cards">
-  <!-- card 1: running -->
-  <div class="task-card" style="border-color:var(--ac)">
-    <div class="tc-top">
-      <div class="tc-name">🎤 漂漂 <span style="font-size:11px;color:var(--mu);font-weight:400">Popo Live</span></div>
-      <span class="tc-status tc-running">● 运行中</span>
-    </div>
-    <div class="tc-bar-bg"><div class="tc-bar-fg" style="width:14%"></div></div>
-    <div class="tc-stats">
-      <span>房间 <b>27/192</b></span>
-      <span>已发 <b>218</b></span>
-      <span>失败 <b>5</b></span>
-    </div>
-    <div class="tc-meta">
-      <span class="tag t1">REST</span>
-      <span>间隔 3s</span>
-      <span>今日榜</span>
-      <span>全部</span>
-    </div>
+<!-- ═══ Top Bar ═══ -->
+<div class="topbar">
+  <button class="back" onclick="goBack()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+    返回看板
+  </button>
+  <div class="title">
+    <span class="status-dot dot-run"></span> 漂漂 · Popo Live
   </div>
-
-  <!-- card 2: running -->
-  <div class="task-card" style="border-color:var(--gn)">
-    <div class="tc-top">
-      <div class="tc-name">💬 梦音 <span style="font-size:11px;color:var(--mu);font-weight:400">Mengyin</span></div>
-      <span class="tc-status tc-running">● 运行中</span>
-    </div>
-    <div class="tc-bar-bg"><div class="tc-bar-fg" style="width:65%"></div></div>
-    <div class="tc-stats">
-      <span>房间 <b>12/19</b></span>
-      <span>已发 <b>94</b></span>
-      <span>失败 <b>1</b></span>
-    </div>
-    <div class="tc-meta">
-      <span class="tag t2">Frida</span>
-      <span>间隔 5s</span>
-      <span>本周</span>
-      <span>男神</span>
-    </div>
-  </div>
-
-  <!-- card 3: idle -->
-  <div class="task-card">
-    <div class="tc-top">
-      <div class="tc-name">📱 新 App <span style="font-size:11px;color:var(--mu);font-weight:400">待配置</span></div>
-      <span class="tc-status tc-idle">○ 未开始</span>
-    </div>
-    <div style="text-align:center;padding:20px;color:var(--mu);font-size:20px">+</div>
-    <div style="text-align:center;font-size:11px;color:var(--mu)">添加新 App</div>
+  <div class="right">
+    <div class="btn btn-pause btn-xs" id="btnPause" onclick="togglePause()">暂停</div>
+    <div class="btn btn-stop btn-xs" onclick="stopTask()">停止</div>
+    <div class="btn btn-ghost btn-xs" onclick="openSettings()">设置</div>
   </div>
 </div>
 
-<!-- ====== 3. TASK DETAIL PAGE ====== -->
-<h2>3. 任务详情页 <span style="font-size:13px;color:var(--mu);font-weight:400">← 从看板点进来</span></h2>
+<!-- ═══ Progress Bar ═══ -->
+<div class="progress-bar">
+  <span style="color:var(--text-muted);white-space:nowrap">进度</span>
+  <span class="pb-stat">27/192</span>
+  <div class="pb-track"><div class="pb-fill" style="width:14%"></div></div>
+  <span class="pb-stat">已发 <span class="ok">218</span></span>
+  <span class="pb-stat">失败 <span class="fl">5</span></span>
+  <span style="font-size:12px;color:var(--text-muted);margin-left:auto">当前: CarpeDiem</span>
+</div>
 
-<div class="dash">
-  <div class="dt">
-    <div class="back-link">← 返回看板</div>
-    <span style="font-size:13px;font-weight:600">🎤 漂漂 (Popo Live)</span>
-    <span style="font-size:10px;color:var(--mu)">auto ✓</span>
-    <span class="tag t1" style="font-size:10px">REST</span>
-    <span style="font-size:10px;padding:3px 8px;border-radius:8px;background:rgba(74,222,128,.12);color:var(--gn)">● 运行中</span>
-    <span style="flex:1"></span>
-    <span style="font-size:10px;color:var(--mu)">进度 27/192 · 已发 218 · 失败 5</span>
-    <span class="tag" style="background:rgba(251,191,36,.12);color:var(--am);font-size:10px">⏸ 暂停</span>
-    <span style="font-size:10px;color:var(--mu);cursor:pointer">⚙</span>
-  </div>
+<!-- ═══ Main Content ═══ -->
+<div class="main">
 
-  <div class="db">
-    <div class="dl">
-      <div class="secl">实时进度</div>
-      <div style="font-size:10px;color:var(--mu);margin-bottom:6px">最多显示 4 个</div>
-      <div class="sr sel"><span>CarpeDiem</span><span class="st sw">发送中</span></div>
-      <div class="sr"><span>西柚音乐厅</span><span class="st ss">已发8</span></div>
-      <div class="sr"><span>悦悦的小屋</span><span class="st ss">已发12</span></div>
-      <div class="sr"><span>韩韩直播间</span><span class="st se">排队中</span></div>
-      <div style="font-size:9px;color:var(--mu);text-align:center;padding:6px;border-top:1px solid var(--bd);margin-top:6px">
-        语音厅 66 · 视频 126<br>共 192 间 · 已完成 27 · 剩余 165
-      </div>
-      <div class="secl">快捷操作</div>
-      <div style="font-size:10px;color:var(--ac);padding:2px 0;cursor:pointer">📋 查看全部房间</div>
-      <div style="font-size:10px;color:var(--ac);padding:2px 0;cursor:pointer">↻ 重新扫描房间</div>
+  <!-- Left: Room List -->
+  <div class="panel panel-left">
+    <div class="panel-header">房间列表 <span class="count">4/192</span></div>
+
+    <div class="room-item done">
+      <div><div class="ri-name">悦悦音乐厅</div><div class="ri-meta">已发 12 人</div></div>
+      <span class="ri-badge room-done">完成</span>
+    </div>
+    <div class="room-item done">
+      <div><div class="ri-name">星辰大海</div><div class="ri-meta">已发 8 人</div></div>
+      <span class="ri-badge room-done">完成</span>
+    </div>
+    <div class="room-item active">
+      <div><div class="ri-name">CarpeDiem</div><div class="ri-meta">排名 6/43 人 &middot; 已发 5</div></div>
+      <span class="ri-badge room-prog">进行中</span>
+    </div>
+    <div class="room-item">
+      <div><div class="ri-name">午夜电台</div><div class="ri-meta">57 人待发</div></div>
+      <span class="ri-badge room-wait">等待</span>
     </div>
 
-    <div class="dm">
-      <!-- settings -->
-      <div style="background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:10px">
-        <div style="font-size:11px;color:var(--mu);margin-bottom:6px">⚙ 发送设置</div>
-        <div class="set-bar">
-          <label>发信间隔</label><input value="3">秒
-          <label style="margin-left:12px">数据源</label><select><option>贡献榜</option></select>
-          <select><option>今日</option><option>本周</option></select>
-          <select><option>全部</option><option>男</option><option>女</option></select>
-        </div>
-      </div>
+    <div class="room-list-footer"><a href="#">查看全部 192 间 &rarr;</a></div>
+  </div>
 
-      <div class="tab-row"><span class="tab">全部</span><span class="tab">男</span><span class="tab">女</span><span style="flex:1"></span><span class="tab">今日</span><span class="tab">本周</span></div>
-      <div style="font-size:11px;color:var(--mu);margin-bottom:6px">当前：<b>CarpeDiem</b> · 排名 15 人 · 未发 10 人</div>
-      <div class="ur"><span class="rk">1</span><span class="sk">杨间</span><span style="color:var(--am)">4,085</span><span style="font-size:10px;color:var(--ac);margin-left:auto">♂</span><span style="font-size:9px;color:var(--gn)">已发 ✓</span></div>
-      <div class="ur"><span class="rk">2</span><span class="sk">渡川_</span><span style="color:var(--am)">3,565</span><span style="font-size:10px;color:var(--pk);margin-left:auto">♀</span><span style="font-size:9px;color:var(--gn)">已发 ✓</span></div>
-      <div class="ur"><span class="rk">3</span>神秘人<span style="color:var(--am)">1,778</span><span style="font-size:10px;color:var(--ac);margin-left:auto">♂</span></div>
-      <div class="ur"><span class="rk">4</span>不见山谷<span style="color:var(--am)">1,520</span><span style="font-size:10px;color:var(--ac);margin-left:auto">♂</span></div>
-      <div class="ur"><span class="rk">5</span><span style="color:var(--rd)">老用户8888</span><span style="color:var(--mu);margin-left:auto;font-size:10px">等级不足</span></div>
+  <!-- Center: Ranking -->
+  <div class="panel panel-center">
+    <div class="panel-header">贡献榜 · 今日 · CarpeDiem <span class="count">43 人</span></div>
+    <table class="ranking-table">
+      <thead>
+        <tr><th>#</th><th>用户</th><th>UID</th><th>性别</th><th style="text-align:right">贡献</th><th>状态</th></tr>
+      </thead>
+      <tbody>
+        <tr class="row-sent">
+          <td class="rank-num top">1</td><td>风间琉璃</td><td class="uid">90734574</td><td>男</td><td class="amount">12,800</td>
+          <td><span class="status-tag tag-sent">已发</span></td>
+        </tr>
+        <tr class="row-sent">
+          <td class="rank-num top">2</td><td>杨间</td><td class="uid">91234001</td><td>男</td><td class="amount">9,450</td>
+          <td><span class="status-tag tag-sent">已发</span></td>
+        </tr>
+        <tr class="row-sending">
+          <td class="rank-num top">3</td><td>深海沉默</td><td class="uid">88901234</td><td>男</td><td class="amount">8,220</td>
+          <td><span class="status-tag tag-sent">发送中...</span></td>
+        </tr>
+        <tr>
+          <td class="rank-num">4</td><td>夜雨声烦</td><td class="uid">92345001</td><td>女</td><td class="amount">6,700</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td class="rank-num">5</td><td>花想容</td><td class="uid">91567002</td><td>女</td><td class="amount">5,430</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td class="rank-num">6</td><td>剑来</td><td class="uid">90888001</td><td>男</td><td class="amount">4,100</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td class="rank-num">7</td><td>浅梦微凉</td><td class="uid">93111001</td><td>女</td><td class="amount">3,820</td>
+          <td></td>
+        </tr>
+        <tr class="row-fail">
+          <td class="rank-num">8</td><td>MrKing</td><td class="uid">88765001</td><td>男</td><td class="amount">3,150</td>
+          <td><span class="status-tag tag-fail">等级不足</span></td>
+        </tr>
+        <tr class="row-fail">
+          <td class="rank-num">9</td><td>飘雪</td><td class="uid">93222001</td><td>女</td><td class="amount">2,980</td>
+          <td><span class="status-tag tag-fail">免打扰</span></td>
+        </tr>
+        <tr>
+          <td class="rank-num">10</td><td>清风徐来</td><td class="uid">94444001</td><td>男</td><td class="amount">2,410</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td class="rank-num">...</td><td colspan="5" style="color:var(--text-muted);text-align:center;padding:16px">更多 33 人待发送</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Right: Send Panel + Logs -->
+  <div class="panel panel-right">
+    <!-- Settings -->
+    <div class="send-section">
+      <h4>发送设置</h4>
+      <div class="setting-row"><label>间隔时间</label><input type="number" value="3" min="1" max="60"> 秒</div>
+      <div class="setting-row"><label>数据源</label><select><option>贡献榜</option></select></div>
+      <div class="setting-row"><label>时段</label><select><option>今日</option><option>本周</option></select></div>
+      <div class="setting-row"><label>性别</label><select><option>全部</option><option>男</option><option>女</option></select></div>
     </div>
 
-    <div class="dr">
-      <div class="secl">话术模板</div>
-      <div style="font-size:10px;color:var(--mu);background:var(--bg);border-radius:6px;padding:6px 8px;line-height:1.5">
-        {nick}你好，来我房间玩嘛~<br>{nick}在吗？聊聊呀<br>{nick}哈喽~
-      </div>
-      <div style="font-size:9px;color:var(--mu);margin-top:2px">3 条 · 随机 · {nick}=昵称</div>
-      <div style="text-align:right;font-size:9px;color:var(--ac);margin-top:2px">编辑 →</div>
+    <!-- Templates -->
+    <div class="send-section">
+      <h4>话术模板 <span style="font-weight:400;text-transform:none;font-size:10px">随机选取</span></h4>
+      <div class="template-item"><span class="nick">{nick}</span>你好，来我房间玩嘛~</div>
+      <div class="template-item"><span class="nick">{nick}</span>在吗？聊聊呀</div>
+      <div class="template-item"><span class="nick">{nick}</span>哈喽~ 来听听歌</div>
+      <div class="template-item" style="color:var(--text-muted);text-align:center;border:1px dashed var(--border);background:transparent;cursor:pointer">+ 添加话术</div>
+    </div>
 
-      <div class="secl">发送日志</div>
-      <div class="logl" style="color:var(--gn)">[14:31:02] ✓ 杨间 "来我房间嘛~"</div>
-      <div class="logl" style="color:var(--gn)">[14:31:08] ✓ 渡川_ "在吗？聊聊"</div>
-      <div class="logl" style="color:var(--rd)">[14:31:12] ✗ 老用户8888 · 等级不足</div>
-      <div class="logl" style="color:var(--gn)">[14:31:15] ✓ 神秘人 "哈喽~"</div>
-      <div class="logl" style="color:var(--mu)">[14:31:20] ← 本间完成</div>
-      <div class="logl" style="color:var(--gn)">[14:31:23] ✓ 韩韩 "聊聊呀"</div>
-
-      <div style="margin-top:10px;padding:10px;background:var(--bg);border-radius:8px">
-        <span style="font-size:11px;color:var(--mu)">今日统计</span>
-        <div style="font-size:11px;line-height:1.8;margin-top:4px">
-          <span style="color:var(--gn)">✓ 已发 218</span> · <span style="color:var(--rd)">✗ 失败 5</span> · <span style="color:var(--mu)">← 剩余 165 间</span>
-        </div>
-      </div>
-
-      <div style="background:var(--gn);color:#0f172a;text-align:center;padding:10px;border-radius:8px;font-weight:600;font-size:13px;margin-top:10px">⏸ 暂停</div>
+    <!-- Send Log -->
+    <div class="send-section" style="border-bottom:none;padding-top:0">
+      <h4>发送日志</h4>
+    </div>
+    <div class="log-list" id="logList">
+      <div class="log-item log-ok"><span class="log-time">14:32:01</span><span class="log-msg">深海沉默 (UID:88901234) 发送成功</span></div>
+      <div class="log-item log-ok"><span class="log-time">14:31:58</span><span class="log-msg">杨间 (UID:91234001) 发送成功</span></div>
+      <div class="log-item log-ok"><span class="log-time">14:31:55</span><span class="log-msg">风间琉璃 (UID:90734574) 发送成功</span></div>
+      <div class="log-item log-err"><span class="log-time">14:31:52</span><span class="log-msg">MrKing (UID:88765001) 失败 — 等级不足 (Lv.3 &lt; 6)</span></div>
+      <div class="log-item log-info"><span class="log-time">14:31:00</span><span class="log-msg">房间 CarpeDiem 贡献榜加载完成 (43人)</span></div>
+      <div class="log-item log-info"><span class="log-time">14:30:55</span><span class="log-msg">星辰大海 发送完毕，切换下一间</span></div>
     </div>
   </div>
+
 </div>
 
-<!-- ====== 4. NAVIGATION FLOW ====== -->
-<h2>4. 导航流程</h2>
-<div style="display:flex;align-items:center;gap:10px;padding:14px;background:var(--srf);border-radius:8px;font-size:13px">
-  <div style="background:var(--bg);border:1px solid var(--ac);border-radius:6px;padding:8px 16px"><b>浓缩看板</b><br><span style="font-size:10px;color:var(--mu)">/ → 所有 App 卡片</span></div>
-  <span style="color:var(--mu);font-size:18px">→</span>
-  <div style="background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:8px 16px;color:var(--mu)">点击某 App 卡片</div>
-  <span style="color:var(--mu);font-size:18px">→</span>
-  <div style="background:var(--bg);border:1px solid var(--gn);border-radius:6px;padding:8px 16px"><b>任务详情</b><br><span style="font-size:10px;color:var(--mu)">/app/piaopiao → 完整面板</span></div>
-  <span style="color:var(--mu);font-size:18px">→</span>
-  <div style="background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:8px 16px;color:var(--mu)">← 返回看板</div>
-</div>
-
-<!-- ====== 5. STRUCTURE ====== -->
-<h2>5. 框架结构</h2>
-<div class="tree">
-<span class="cm2">framework/</span>
-  <span class="d">core/</span>
-    <span class="f">base_client.py</span>          <span class="cm2">Pipeline + HTTP + 过滤 · 每个 App 一个实例独立运行</span>
-    <span class="f">state_manager.py</span>        <span class="cm2">每 App 独立缓存目录 apps/{name}/.state/</span>
-    <span class="f">task_manager.py</span>         <span class="cm2">多任务调度 · 启动/暂停/状态查询</span>
-    <span class="f">dashboard.py</span>           <span class="cm2">Flask · / 看板 · /app/{name} 详情</span>
-  <span class="d">bridge/</span>
-    <span class="f">nim_bridge.py</span>           <span class="cm2">Frida NIM 桥</span>
-    <span class="f">hook_nim.js</span>
-<span class="cm2">apps/</span>
-  <span class="d">piaopiao/</span>   <span class="cm2">config.json · client.py · .state/</span>
-  <span class="d">mengyin/</span>    <span class="cm2">config.json · client.py · .state/</span>
-</div>
-
-<!-- ====== 6. DATA SOURCE CONFIG ====== -->
-<h2>6. 数据源 / 筛选配置</h2>
-<div class="row">
-  <div class="card" style="flex:1">
-    <h3>漂漂 config.json</h3>
-    <div class="code">{
-    <span class="st">"name"</span>: <span class="st">"漂漂"</span>,
-    <span class="st">"app_id"</span>: <span class="st">"piaopiao"</span>,
-    <span class="st">"send_mode"</span>: <span class="st">"rest"</span>,
-    <span class="st">"data_sources"</span>: [<span class="st">"贡献榜"</span>],
-    <span class="st">"periods"</span>: [<span class="st">"今日"</span>, <span class="st">"本周"</span>],
-    <span class="st">"genders"</span>: [<span class="st">"全部"</span>, <span class="st">"男"</span>, <span class="st">"女"</span>],
-    ...
-}</div>
+<!-- ═══ Settings Modal ═══ -->
+<div class="modal-overlay hidden" id="settingsModal" style="position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;z-index:200;">
+<div class="modal" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:28px;width:90%;max-width:440px;">
+  <h3 style="font-family:var(--font-mono);font-size:16px;margin-bottom:20px">漂漂 设置</h3>
+  <label style="font-size:12px;color:var(--text-muted);display:block;margin:12px 0 4px">发信间隔（秒）</label>
+  <input type="number" value="3" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:var(--radius-sm);font-size:13px">
+  <label style="font-size:12px;color:var(--text-muted);display:block;margin:12px 0 4px">话术模板（一行一条）</label>
+  <textarea style="width:100%;height:80px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:8px;font-size:12px;resize:vertical">{nick}你好，来我房间玩嘛~
+{nick}在吗？聊聊呀
+{nick}哈喽~ 来听听歌</textarea>
+  <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end">
+    <div class="btn btn-ghost" onclick="closeSettings()">关闭</div>
+    <div class="btn btn-start" onclick="closeSettings()">保存</div>
   </div>
-  <div class="card" style="flex:1">
-    <h3>梦音 config.json</h3>
-    <div class="code">{
-    <span class="st">"name"</span>: <span class="st">"梦音"</span>,
-    <span class="st">"app_id"</span>: <span class="st">"mengyin"</span>,
-    <span class="st">"send_mode"</span>: <span class="st">"frida_nim"</span>,
-    <span class="st">"data_sources"</span>: [<span class="st">"财富榜"</span>,<span class="st">"公会房间榜"</span>],
-    <span class="st">"periods"</span>: [<span class="st">"今日"</span>,<span class="st">"本周"</span>,<span class="st">"昨日"</span>,<span class="st">"上周"</span>],
-    <span class="st">"genders"</span>: [<span class="st">"全部"</span>,<span class="st">"男神"</span>,<span class="st">"女神"</span>],
-    ...
-}</div>
-  </div>
-</div>
-<p style="font-size:12px;color:var(--mu)">Dashboard 根据 config 动态渲染下拉框，不同 App 筛选选项不同，无需改框架代码。</p>
+</div></div>
 
-<!-- ====== 7. COMPARISON ====== -->
-<h2>7. 前后对比</h2>
-<table>
-<thead><tr><th>维度</th><th>现在</th><th style="color:var(--gn)">框架化之后</th></tr></thead>
-<tbody>
-<tr><td>新增 App 代码</td><td>~500 行</td><td class="hl">~60 行（3 方法）</td></tr>
-<tr><td>多 App 并行</td><td>—</td><td class="hl">浓缩看板 + 详情页</td></tr>
-<tr><td>房间遍历 + 缓存</td><td>每次手写</td><td class="hl">BaseClient 内置</td></tr>
-<tr><td>断点恢复</td><td>没有</td><td class="hl">每 App 独立 .state/</td></tr>
-<tr><td>数据源/筛选</td><td>硬编码</td><td class="hl">config 声明 · Dashboard 动态渲染</td></tr>
-<tr><td>认证</td><td>手动改代码</td><td class="hl">auto / manual</td></tr>
-<tr><td>纯 API 接入</td><td>—</td><td class="hl">~15 分钟</td></tr>
-</tbody></table>
-
-</div></body></html>
+<script>
+function goBack() { if (confirm('返回首页看板？')) window.location.href = 'homepage.html'; }
+function togglePause() {
+  var btn = document.getElementById('btnPause');
+  if (btn.textContent === '暂停') {
+    btn.textContent = '继续'; btn.className = 'btn btn-start btn-xs';
+  } else {
+    btn.textContent = '暂停'; btn.className = 'btn btn-pause btn-xs';
+  }
+}
+function stopTask() { if (confirm('确认停止？进度将重置。')) goBack(); }
+function openSettings() { document.getElementById('settingsModal').classList.remove('hidden'); }
+function closeSettings() { document.getElementById('settingsModal').classList.add('hidden'); }
+document.getElementById('settingsModal').addEventListener('click', function(e) { if (e.target===this) closeSettings(); });
+document.addEventListener('keydown', function(e) { if (e.key==='Escape') closeSettings(); });
+</script>
+</body>
+</html>

@@ -1,107 +1,263 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>统一私信框架 · 首页看板</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>截流看板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0f172a;--srf:#1e293b;--bd:#334155;--tx:#e2e8f0;--mu:#94a3b8;--ac:#38bdf8;--gn:#4ade80;--am:#fbbf24;--rd:#f87171;--pu:#a78bfa}
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--tx);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:40px}
-.container{width:100%;max-width:1000px}
-h1{font-size:24px;font-weight:700;margin-bottom:4px}
-.sub{color:var(--mu);font-size:13px;margin-bottom:28px}
+:root {
+  --bg: #080C14;
+  --surface: #111827;
+  --surface-2: #1A2332;
+  --border: #1E2D3D;
+  --primary: #3B82F6;
+  --primary-muted: rgba(59,130,246,.12);
+  --accent: #F59E0B;
+  --accent-muted: rgba(245,158,11,.12);
+  --success: #22C55E;
+  --success-muted: rgba(34,197,94,.12);
+  --danger: #EF4444;
+  --danger-muted: rgba(239,68,68,.12);
+  --text: #E2E8F0;
+  --text-muted: #94A3B8;
+  --text-inverse: #0F172A;
+  --radius: 12px;
+  --radius-sm: 6px;
+  --font-mono: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --font-sans: 'Fira Sans', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', 'Segoe UI', system-ui, sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 40px 32px;
+  -webkit-font-smoothing: antialiased;
+}
 
-/* task grid */
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+/* ── Layout ── */
+.container { max-width: 1200px; margin: 0 auto; }
 
-/* card */
-.card{background:var(--srf);border:1px solid var(--bd);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s;position:relative}
-.card:hover{border-color:var(--ac);box-shadow:0 0 20px rgba(56,189,248,.06)}
-.card.running{border-color:var(--ac)}
-.card.paused{border-color:var(--am)}
-.card.empty{border:1px dashed var(--bd);cursor:pointer;display:flex;align-items:center;justify-content:center;min-height:210px;flex-direction:column;gap:8px;color:var(--mu)}
-.card.empty:hover{border-color:var(--mu)}
+/* ── Header ── */
+.header { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom: 32px; flex-wrap:wrap; gap:16px; }
+.header h1 { font-family: var(--font-mono); font-size: 22px; font-weight: 600; letter-spacing: -0.5px; }
+.header h1 .accent { color: var(--primary); }
+.header .summary { font-size: 13px; color: var(--text-muted); display:flex; align-items:center; gap:6px; }
+.header .summary .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); display:inline-block; }
+.header .summary b { color: var(--success); font-weight: 600; }
+.header .actions-row { display:flex; gap:8px; align-items:center; }
 
-/* card header */
-.ch{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
-.ch .name{font-size:16px;font-weight:600}
-.ch .status{font-size:11px;padding:4px 10px;border-radius:20px;font-weight:600}
-.st-run{background:rgba(74,222,128,.12);color:var(--gn)}
-.st-pause{background:rgba(251,191,36,.12);color:var(--am)}
-.st-idle{background:rgba(148,163,184,.12);color:var(--mu)}
-.st-err{background:rgba(248,113,113,.12);color:var(--rd)}
+/* ── Grid ── */
+.grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 
-/* progress bar */
-.pb-bg{background:var(--bg);border-radius:5px;height:8px;margin:14px 0 10px;overflow:hidden}
-.pb-fg{background:var(--ac);height:100%;border-radius:5px;transition:width .3s}
-.pb-fg.done{background:var(--gn)}
-.pb-fg.paused{background:var(--am)}
+/* ── Card ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  transition: border-color .2s, box-shadow .2s;
+  position: relative;
+  display:flex; flex-direction:column;
+}
+.card:hover { border-color: #2D4A6D; }
+.card.running { border-color: var(--primary); box-shadow: 0 0 0 1px rgba(59,130,246,.15); }
+.card.paused  { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(245,158,11,.12); }
 
-/* stats row */
-.stats{display:flex;gap:16px;font-size:13px;margin-bottom:10px}
-.stats span{color:var(--mu)}
-.stats b{color:var(--tx);font-weight:600}
-.stat-ok{color:var(--gn) !important}.stat-fail{color:var(--rd) !important}
+/* Empty card */
+.card.empty {
+  border: 1px dashed var(--border);
+  align-items: center; justify-content: center;
+  min-height: 220px; cursor: pointer;
+  gap: 10px; color: var(--text-muted);
+}
+.card.empty:hover { border-color: var(--text-muted); background: var(--surface-2); }
+.empty-plus { width: 40px; height: 40px; opacity: .25; }
 
-/* meta tags */
-.meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.meta .mt{font-size:10px;padding:3px 8px;border-radius:4px;background:rgba(255,255,255,.04);color:var(--mu)}
-.meta .mt.hl{background:rgba(56,189,248,.1);color:var(--ac)}
+/* ── Card internals ── */
+.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.card-header .name { font-size: 15px; font-weight: 600; display:flex; align-items:center; gap:8px; }
+.card-header .name .app-icon { width: 20px; height: 20px; color: var(--primary); flex-shrink:0; }
+.card-header .subtitle { font-size: 11px; color: var(--text-muted); font-weight: 400; }
 
-/* actions */
-.actions{display:flex;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.06)}
-.btn{font-size:11px;padding:5px 14px;border-radius:6px;font-weight:600;cursor:pointer;border:none;transition:all .15s}
-.btn-start{background:var(--gn);color:#0f172a}
-.btn-pause{background:var(--am);color:#0f172a}
-.btn-stop{background:var(--rd);color:#fff}
-.btn-detail{background:transparent;border:1px solid var(--bd);color:var(--tx)}
-.btn:hover{filter:brightness(1.15)}
-.btn:active{transform:scale(0.97)}
+.status-badge {
+  font-size: 11px; padding: 4px 10px; border-radius: 20px;
+  font-weight: 600; white-space: nowrap; display:flex; align-items:center; gap:5px;
+}
+.st-run   { background: var(--success-muted); color: var(--success); }
+.st-pause { background: var(--accent-muted); color: var(--accent); }
+.st-idle  { background: rgba(148,163,184,.08); color: var(--text-muted); }
+.st-err   { background: var(--danger-muted); color: var(--danger); }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; display:inline-block; }
+.st-run .status-dot   { background: var(--success); animation: pulse 2s infinite; }
+.st-pause .status-dot { background: var(--accent); }
+.st-idle .status-dot  { background: var(--text-muted); }
 
-/* empty card */
-.empty-icon{font-size:36px;opacity:.3}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
-/* modal overlay */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:100}
-.modal{background:var(--srf);border:1px solid var(--bd);border-radius:16px;padding:28px;width:90%;max-width:480px}
-.modal h3{font-size:18px;margin-bottom:16px}
-.modal label{font-size:12px;color:var(--mu);display:block;margin:10px 0 4px}
-.modal input,.modal select{width:100%;background:var(--bg);border:1px solid var(--bd);color:var(--tx);padding:8px 12px;border-radius:6px;font-size:13px}
-.modal .btn-row{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
-.hidden{display:none !important}
+/* Progress bar */
+.pb-track { background: var(--bg); border-radius: 4px; height: 6px; margin: 12px 0 10px; overflow:hidden; }
+.pb-fill  { height: 100%; border-radius: 4px; transition: width .4s ease-out; background: var(--primary); }
+.pb-fill.done   { background: var(--success); }
+.pb-fill.paused { background: var(--accent); }
+
+/* Stats */
+.stats { display:flex; gap:20px; font-size: 13px; margin-bottom: 8px; }
+.stats .st { color: var(--text-muted); }
+.stats .st b { color: var(--text); font-weight: 600; font-family: var(--font-mono); font-size: 13px; }
+.stats .st .ok { color: var(--success); }
+.stats .st .fl { color: var(--danger); }
+
+.current-room { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; display:flex; align-items:center; gap:4px; }
+
+/* Meta tags */
+.meta { display:flex; gap:6px; flex-wrap:wrap; margin-top: 4px; }
+.meta .tag { font-size: 10px; padding: 3px 8px; border-radius: 4px; background: rgba(255,255,255,.04); color: var(--text-muted); font-weight: 500; }
+.meta .tag.hl { background: var(--primary-muted); color: var(--primary); }
+
+/* Actions bar */
+.actions { display:flex; gap:8px; margin-top:auto; padding-top:14px; border-top: 1px solid rgba(255,255,255,.05); flex-wrap:wrap; }
+
+/* ── Buttons ── */
+.btn {
+  font-size: 12px; padding: 6px 14px; border-radius: var(--radius-sm);
+  font-weight: 600; cursor: pointer; border: none;
+  transition: all .15s; font-family: var(--font-sans);
+  display:inline-flex; align-items:center; gap:5px;
+}
+.btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.btn:active { transform: scale(0.97); }
+
+.btn-start  { background: var(--success); color: var(--text-inverse); }
+.btn-start:hover  { filter: brightness(1.1); }
+.btn-pause  { background: var(--accent); color: var(--text-inverse); }
+.btn-pause:hover  { filter: brightness(1.1); }
+.btn-stop   { background: var(--danger); color: #fff; }
+.btn-stop:hover   { filter: brightness(1.1); }
+.btn-ghost  { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-ghost:hover  { border-color: var(--text-muted); background: rgba(255,255,255,.03); }
+
+.btn .btn-icon { width: 14px; height: 14px; flex-shrink:0; }
+
+/* ── Modal ── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.65);
+  backdrop-filter: blur(6px);
+  display:flex; align-items:center; justify-content:center; z-index:100;
+  animation: fadeIn .15s ease-out;
+}
+.modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 28px;
+  width: 90%; max-width: 480px;
+  animation: scaleIn .2s ease-out;
+}
+@keyframes fadeIn  { from { opacity:0 } to { opacity:1 } }
+@keyframes scaleIn { from { opacity:0; transform: scale(.95) } to { opacity:1; transform: scale(1) } }
+
+.modal h3 { font-family: var(--font-mono); font-size: 16px; font-weight:600; margin-bottom:20px; }
+.modal label { font-size: 12px; color: var(--text-muted); display:block; margin: 12px 0 4px; font-weight:500; }
+.modal input, .modal select, .modal textarea {
+  width: 100%; background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); padding: 8px 12px; border-radius: var(--radius-sm);
+  font-size: 13px; font-family: var(--font-sans);
+  transition: border-color .15s;
+}
+.modal input:focus, .modal select:focus, .modal textarea:focus {
+  outline: none; border-color: var(--primary);
+}
+.modal textarea { resize: vertical; }
+.modal .btn-row { display:flex; gap:8px; margin-top:20px; justify-content:flex-end; }
+
+.hidden { display:none !important; }
+
+/* ── Toast ── */
+.toast {
+  position: fixed; bottom: 24px; right: 24px; z-index: 200;
+  background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text); padding: 10px 20px; border-radius: var(--radius-sm);
+  font-size: 13px; animation: scaleIn .2s ease-out;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  body { padding: 20px 16px; }
+  .header { flex-direction: column; align-items: flex-start; }
+  .grid { grid-template-columns: 1fr; }
+  .modal { width: 95%; padding: 20px; }
+}
 </style>
 </head>
-<body onload="init()">
+<body>
+
 <div class="container">
 
-<h1>📊 截流看板</h1>
-<p class="sub">2026年5月25日 周日 14:32 · 今日累计已发 <b style="color:var(--gn)">412</b> 条私信</p>
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h1>截流<span class="accent">看板</span></h1>
+      <div class="summary" style="margin-top:6px">
+        <span class="dot"></span> 今日累计已发 <b id="totalSent">412</b> 条私信
+        <span style="margin-left:8px;font-size:11px" id="clock"></span>
+      </div>
+    </div>
+    <div class="actions-row">
+      <div class="btn btn-ghost" onclick="refreshAll()">
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7.9 6.5 2.5"/><path d="M21 3v6h-6"/></svg>
+        刷新
+      </div>
+    </div>
+  </div>
 
-<!-- task grid -->
-<div class="grid" id="taskGrid"></div>
+  <!-- Task Grid -->
+  <div class="grid" id="taskGrid"></div>
 
 </div>
 
-<!-- ADD APP MODAL -->
+<!-- Add App Modal -->
 <div class="modal-overlay hidden" id="addAppModal">
-<div class="modal">
-<h3>添加新 App</h3>
-<label>App 名称</label><input id="newAppName" placeholder="例如：漂漂、梦音">
-<label>包名</label><input id="newAppPkg" placeholder="例如：com.example.app">
-<label>私信方式</label>
-<select id="newAppMode"><option value="rest">REST API</option><option value="frida_nim">Frida NIM</option><option value="none">纯浏览（不发送）</option></select>
-<div class="btn-row">
-  <div class="btn btn-detail" onclick="toggleModal()">取消</div>
-  <div class="btn btn-start" onclick="addApp()">确认添加</div>
+  <div class="modal">
+    <h3>添加新 App</h3>
+    <label>App 名称</label>
+    <input id="newAppName" placeholder="例如：漂漂、梦音" autocomplete="off">
+    <label>包名</label>
+    <input id="newAppPkg" placeholder="例如：com.example.app" autocomplete="off">
+    <label>私信方式</label>
+    <select id="newAppMode">
+      <option value="rest">REST API</option>
+      <option value="frida_nim">Frida NIM</option>
+      <option value="none">纯浏览（不发送）</option>
+    </select>
+    <div class="btn-row">
+      <div class="btn btn-ghost" onclick="closeAddModal()">取消</div>
+      <div class="btn btn-start" onclick="addApp()">
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        确认添加
+      </div>
+    </div>
+  </div>
 </div>
-</div></div>
 
-<!-- CONFIG MODAL -->
+<!-- Config Modal -->
 <div class="modal-overlay hidden" id="configModal">
-<div class="modal" id="configContent"></div>
+  <div class="modal" id="configContent"></div>
 </div>
+
+<!-- Detail Modal (compact) -->
+<div class="modal-overlay hidden" id="detailModal">
+  <div class="modal" id="detailContent" style="max-width:640px"></div>
+</div>
+
+<!-- Toast -->
+<div class="toast hidden" id="toast"></div>
 
 <script>
+// ═══ State ═══
 var apps = [
   {
     id: "piaopiao", name: "漂漂", subtitle: "Popo Live",
@@ -127,146 +283,225 @@ var apps = [
   { id: "empty", type: "empty" }
 ];
 
+// ═══ SVG Icons (inline, no emojis) ═══
+var ICONS = {
+  music: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  plus: '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>',
+  play: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>',
+  pause: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>',
+  stop: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>',
+  detail: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h12"/></svg>',
+  config: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+  refresh: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7.9 6.5 2.5"/><path d="M21 3v6h-6"/></svg>'
+};
+
+// ═══ Init ═══
 function init() {
+  updateClock();
+  setInterval(updateClock, 30000);
   render();
   document.getElementById('taskGrid').addEventListener('click', function(e) {
     var btn = e.target.closest('[data-action]');
     if (!btn) return;
-    var act = btn.dataset.action;
-    var appId = btn.dataset.appid;
-    if (act === 'start') startTask(appId);
-    if (act === 'pause') pauseTask(appId);
-    if (act === 'stop') stopTask(appId);
+    var act = btn.dataset.action, appId = btn.dataset.appid;
+    if (act === 'start')  startTask(appId);
+    if (act === 'pause')  pauseTask(appId);
+    if (act === 'stop')   stopTask(appId);
     if (act === 'detail') showDetail(appId);
     if (act === 'config') showConfig(appId);
     e.stopPropagation();
   });
+  document.getElementById('addAppModal').addEventListener('click', function(e) {
+    if (e.target === this) closeAddModal();
+  });
+  document.getElementById('configModal').addEventListener('click', function(e) {
+    if (e.target === this) closeConfigModal();
+  });
+  document.getElementById('detailModal').addEventListener('click', function(e) {
+    if (e.target === this) closeDetailModal();
+  });
 }
 
+function updateClock() {
+  var now = new Date();
+  var days = ['日','一','二','三','四','五','六'];
+  document.getElementById('clock').textContent =
+    now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 周' + days[now.getDay()] + ' ' +
+    String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+  document.getElementById('totalSent').textContent = apps
+    .filter(function(a){return !a.type}).reduce(function(s,a){return s+a.sent},0);
+}
+
+// ═══ Render ═══
 function render() {
   var html = '';
   apps.forEach(function(app) {
     if (app.type === 'empty') {
-      html += '<div class="card empty" onclick="toggleModal()" data-action="add">'
-        + '<div class="empty-icon">＋</div>'
-        + '<div style="font-size:14px">添加新 App</div>'
+      html += '<div class="card empty" onclick="openAddModal()">'
+        + ICONS.plus
+        + '<div style="font-size:14px;font-weight:500">添加新 App</div>'
         + '<div style="font-size:11px">支持 REST / Frida NIM 模式</div>'
         + '</div>';
       return;
     }
     var pct = app.totalRooms ? Math.round(app.doneRooms / app.totalRooms * 100) : 0;
     var stCls = app.status === 'running' ? 'st-run' : (app.status === 'paused' ? 'st-pause' : 'st-idle');
-    var stLabel = app.status === 'running' ? '● 运行中' : (app.status === 'paused' ? '⏸ 暂停' : '○ 待开始');
+    var stLabel = app.status === 'running' ? '运行中' : (app.status === 'paused' ? '已暂停' : '待开始');
     var borderCls = app.status === 'running' ? 'running' : (app.status === 'paused' ? 'paused' : '');
     var pbCls = pct === 100 ? 'done' : (app.status === 'paused' ? 'paused' : '');
-    var roomLabel = app.status === 'running' ? ('当前: ' + app.currentRoom) : (app.status === 'paused' ? ('停在: ' + app.currentRoom) : '');
-    html += '<div class="card ' + borderCls + '">'
-      + '<div class="ch">'
-        + '<div class="name">🎤 ' + app.name + ' <span style="font-size:11px;color:var(--mu);font-weight:400">' + app.subtitle + '</span></div>'
-        + '<div class="status ' + stCls + '">' + stLabel + '</div>'
-      + '</div>'
-      + '<div class="pb-bg"><div class="pb-fg ' + pbCls + '" style="width:' + pct + '%"></div></div>'
-      + '<div class="stats">'
-        + '<span>房间 <b>' + app.doneRooms + '/' + app.totalRooms + '</b></span>'
-        + '<span>已发 <b class="stat-ok">' + app.sent + '</b></span>'
-        + '<span>失败 <b class="stat-fail">' + app.failed + '</b></span>'
-      + '</div>'
-      + (roomLabel ? ('<div style="font-size:11px;color:var(--mu);margin-bottom:6px">' + roomLabel + '</div>') : '')
-      + '<div class="meta">'
-        + '<span class="mt hl">' + app.mode + '</span>'
-        + '<span class="mt">间隔 ' + app.interval + 's</span>'
-        + '<span class="mt">' + app.dataSource + '</span>'
-        + '<span class="mt">' + app.period + '</span>'
-        + '<span class="mt">' + app.gender + '</span>'
-      + '</div>'
-      + '<div class="actions">';
+    var roomLabel = app.status === 'running' ? '当前: ' + app.currentRoom
+      : (app.status === 'paused' ? '停在: ' + app.currentRoom : '');
+
+    // Action buttons
+    var btns = '';
     if (app.status === 'idle') {
-      html += '<div class="btn btn-start" data-action="start" data-appid="' + app.id + '">▶ 开始群发</div>';
+      btns = '<div class="btn btn-start" data-action="start" data-appid="'+app.id+'">' + ICONS.play + ' 开始群发</div>';
     } else if (app.status === 'running') {
-      html += '<div class="btn btn-pause" data-action="pause" data-appid="' + app.id + '">⏸ 暂停</div>';
-      html += '<div class="btn btn-stop" data-action="stop" data-appid="' + app.id + '">⬛ 停止</div>';
+      btns = '<div class="btn btn-pause" data-action="pause" data-appid="'+app.id+'">' + ICONS.pause + ' 暂停</div>'
+        + '<div class="btn btn-stop" data-action="stop" data-appid="'+app.id+'">' + ICONS.stop + ' 停止</div>';
     } else if (app.status === 'paused') {
-      html += '<div class="btn btn-start" data-action="start" data-appid="' + app.id + '">▶ 继续</div>';
-      html += '<div class="btn btn-stop" data-action="stop" data-appid="' + app.id + '">⬛ 停止</div>';
+      btns = '<div class="btn btn-start" data-action="start" data-appid="'+app.id+'">' + ICONS.play + ' 继续</div>'
+        + '<div class="btn btn-stop" data-action="stop" data-appid="'+app.id+'">' + ICONS.stop + ' 停止</div>';
     }
-    html += '<div class="btn btn-detail" data-action="detail" data-appid="' + app.id + '">📋 详情</div>';
-    html += '<div class="btn btn-detail" data-action="config" data-appid="' + app.id + '">⚙ 设置</div>';
-    html += '</div></div>';
+    btns += '<div class="btn btn-ghost" data-action="detail" data-appid="'+app.id+'">' + ICONS.detail + ' 详情</div>';
+    btns += '<div class="btn btn-ghost" data-action="config" data-appid="'+app.id+'">' + ICONS.config + ' 设置</div>';
+
+    html += '<div class="card ' + borderCls + '">'
+      + '<div class="card-header">'
+        + '<div class="name">' + ICONS.music + ' ' + app.name
+        + ' <span class="subtitle">' + app.subtitle + '</span></div>'
+        + '<div class="status-badge ' + stCls + '"><span class="status-dot"></span>' + stLabel + '</div>'
+      + '</div>'
+      + '<div class="pb-track"><div class="pb-fill ' + pbCls + '" style="width:' + pct + '%"></div></div>'
+      + '<div class="stats">'
+        + '<span class="st">房间 <b>' + app.doneRooms + '/' + app.totalRooms + '</b></span>'
+        + '<span class="st">已发 <b class="ok">' + app.sent + '</b></span>'
+        + '<span class="st">失败 <b class="fl">' + app.failed + '</b></span>'
+      + '</div>'
+      + (roomLabel ? '<div class="current-room"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> ' + roomLabel + '</div>' : '')
+      + '<div class="meta">'
+        + '<span class="tag hl">' + app.mode + '</span>'
+        + '<span class="tag">间隔 ' + app.interval + 's</span>'
+        + '<span class="tag">' + app.dataSource + '</span>'
+        + '<span class="tag">' + app.period + '</span>'
+        + '<span class="tag">' + app.gender + '</span>'
+      + '</div>'
+      + '<div class="actions">' + btns + '</div>'
+      + '</div>';
   });
   document.getElementById('taskGrid').innerHTML = html;
 }
 
+// ═══ Actions ═══
 function startTask(id) {
-  var app = apps.find(function(a) { return a.id === id; });
+  var app = apps.find(function(a){return a.id===id});
   if (!app) return;
   app.status = 'running';
+  if (app.doneRooms === 0) app.currentRoom = '扫描中...';
   render();
+  toast(app.name + ' 已开始');
 }
 
 function pauseTask(id) {
-  var app = apps.find(function(a) { return a.id === id; });
+  var app = apps.find(function(a){return a.id===id});
   if (!app) return;
   app.status = 'paused';
   render();
+  toast(app.name + ' 已暂停');
 }
 
 function stopTask(id) {
-  var app = apps.find(function(a) { return a.id === id; });
+  var app = apps.find(function(a){return a.id===id});
   if (!app) return;
+  if (!confirm('确认停止 ' + app.name + '？已发送记录保留，进度将重置。')) return;
   app.status = 'idle';
   app.doneRooms = 0; app.sent = 0; app.failed = 0;
   app.currentRoom = null;
   render();
+  toast(app.name + ' 已停止');
+}
+
+function refreshAll() {
+  render();
+  updateClock();
+  toast('已刷新');
 }
 
 function showDetail(id) {
-  var app = apps.find(function(a) { return a.id === id; });
+  var app = apps.find(function(a){return a.id===id});
   if (!app) return;
-  alert('[DEMO] 跳转到 /app/' + app.id + ' 任务详情页\n\n'
-    + '该页面显示当前房间实时排行、发送日志、\n话术模板、今日统计等完整信息。\n\n'
-    + '（完整面板请见 design-mockup.html Section 3）');
+  var html = '<h3 style="font-family:var(--font-mono);font-size:16px">' + app.name + ' 任务详情</h3>'
+    + '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">'
+    + '状态: <b style="color:var(--text)">' + (app.status==='running'?'运行中':(app.status==='paused'?'已暂停':'待开始')) + '</b> &middot; '
+    + '进度: ' + app.doneRooms + '/' + app.totalRooms + ' 间 &middot; '
+    + '已发: <b style="color:var(--success)">' + app.sent + '</b> &middot; '
+    + '失败: <b style="color:var(--danger)">' + app.failed + '</b>'
+    + '</div>'
+    + '<div style="padding:24px;text-align:center;color:var(--text-muted);border:1px dashed var(--border);border-radius:var(--radius-sm)">'
+    + '完整详情页（排行列表 / 发送日志 / 话术模板）<br>请见 <b style="color:var(--primary)">design-mockup.html</b></div>'
+    + '<div class="btn-row"><div class="btn btn-ghost" onclick="closeDetailModal()">关闭</div></div>';
+  document.getElementById('detailContent').innerHTML = html;
+  document.getElementById('detailModal').classList.remove('hidden');
 }
 
 function showConfig(id) {
-  var app = apps.find(function(a) { return a.id === id; });
+  var app = apps.find(function(a){return a.id===id});
   if (!app) return;
-  var html = '<h3>⚙ ' + app.name + ' 设置</h3>'
-    + '<label>发信间隔（秒）</label><input value="' + app.interval + '" type="number">'
+  var html = '<h3 style="font-family:var(--font-mono);font-size:16px">' + app.name + ' 设置</h3>'
+    + '<label>发信间隔（秒）</label><input value="' + app.interval + '" type="number" min="1" max="60">'
     + '<label>数据源</label><select><option>' + app.dataSource + '</option></select>'
     + '<label>时段</label><select><option>' + app.period + '</option></select>'
-    + '<label>性别</label><select><option>' + app.gender + '</option></select>'
+    + '<label>性别筛选</label><select><option>' + app.gender + '</option></select>'
     + '<label>话术模板（一行一条，{nick}=昵称）</label>'
-    + '<textarea style="width:100%;height:80px;background:var(--bg);border:1px solid var(--bd);color:var(--tx);border-radius:6px;padding:8px;font-size:12px">{nick}你好，来我房间玩嘛~\n{nick}在吗？聊聊呀\n{nick}哈喽~</textarea>'
-    + '<div class="btn-row"><div class="btn btn-detail" onclick="document.getElementById(\'configModal\').classList.add(\'hidden\')">关闭</div><div class="btn btn-start" onclick="document.getElementById(\'configModal\').classList.add(\'hidden\')">保存</div></div>';
+    + '<textarea style="height:80px">{nick}你好，来我房间玩嘛~\n{nick}在吗？聊聊呀\n{nick}哈喽~</textarea>'
+    + '<div class="btn-row">'
+    + '<div class="btn btn-ghost" onclick="closeConfigModal()">关闭</div>'
+    + '<div class="btn btn-start" onclick="closeConfigModal()">保存</div>'
+    + '</div>';
   document.getElementById('configContent').innerHTML = html;
   document.getElementById('configModal').classList.remove('hidden');
 }
 
-function toggleModal() {
-  document.getElementById('addAppModal').classList.toggle('hidden');
-}
+// ═══ Modals ═══
+function openAddModal() { document.getElementById('addAppModal').classList.remove('hidden'); }
+function closeAddModal() { document.getElementById('addAppModal').classList.add('hidden'); }
+function closeConfigModal() { document.getElementById('configModal').classList.add('hidden'); }
+function closeDetailModal() { document.getElementById('detailModal').classList.add('hidden'); }
 
 function addApp() {
-  var name = document.getElementById('newAppName').value || '新 App';
+  var name = document.getElementById('newAppName').value.trim() || '新 App';
   var mode = document.getElementById('newAppMode').value;
   var id = 'app' + Date.now();
   apps.splice(apps.length - 1, 0, {
     id: id, name: name, subtitle: '待配置',
-    status: 'idle', mode: mode === 'frida_nim' ? 'Frida' : 'REST',
+    status: 'idle', mode: mode === 'frida_nim' ? 'Frida' : (mode === 'none' ? '仅浏览' : 'REST'),
     totalRooms: 0, doneRooms: 0, sent: 0, failed: 0,
     interval: 4, currentRoom: null,
     dataSource: '贡献榜', period: '今日', gender: '全部'
   });
-  toggleModal();
+  closeAddModal();
+  document.getElementById('newAppName').value = '';
   render();
+  toast(name + ' 已添加');
 }
 
-document.getElementById('addAppModal').addEventListener('click', function(e) {
-  if (e.target === document.getElementById('addAppModal')) toggleModal();
+// ═══ Toast ═══
+function toast(msg) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(el._tid);
+  el._tid = setTimeout(function(){ el.classList.add('hidden'); }, 2500);
+}
+
+// ═══ Keyboard ═══
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    closeAddModal(); closeConfigModal(); closeDetailModal();
+  }
 });
-document.getElementById('configModal').addEventListener('click', function(e) {
-  if (e.target === document.getElementById('configModal')) document.getElementById('configModal').classList.add('hidden');
-});
+
+window.addEventListener('load', init);
 </script>
 </body>
 </html>
