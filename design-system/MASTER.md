@@ -1,61 +1,66 @@
 # 截流看板 — Design System
 
-**Generated**: 2026-05-26 | **Tool**: UI/UX Pro Max
+**Update**: 2026-05-26 v2 | **Style**: Apple Spatial Glass — Liquid Glass + VisionOS
 
 ---
 
-## Pattern
-Real-Time / Operations Landing — 监控型 Dashboard，多任务并行状态展示，数据密集但可快速扫描。
+## Style: Apple Spatial Glass
 
-## Style: Dark Mode (OLED)
-纯深色主题，高对比度，适合长时间监控使用。深蓝黑底 + 状态色语义化。
+Cinematic dark + frosted glass panels + spring-physics animations. Premium, minimalist.
+No pure black. No sharp corners. No instant transitions.
 
 ## Color Tokens
 
 | Role | Hex | CSS Variable | Usage |
 |------|-----|-------------|-------|
-| Background | `#080C14` | `--bg` | 页面底色 |
-| Surface | `#111827` | `--surface` | 卡片、模态框 |
-| Surface Elevated | `#1A2332` | `--surface-2` | 悬浮态 |
-| Border | `#1E2D3D` | `--border` | 分割线、边框 |
-| Primary | `#3B82F6` | `--primary` | 主按钮、链接、进度条 |
-| Primary Muted | `#1E3A5F` | `--primary-muted` | 主色背景层 |
-| Accent | `#F59E0B` | `--accent` | 暂停状态、警告 |
-| Success | `#22C55E` | `--success` | 运行中、已发送 |
-| Danger | `#EF4444` | `--danger` | 失败、停止、错误 |
-| Text Primary | `#E2E8F0` | `--text` | 正文 |
-| Text Secondary | `#94A3B8` | `--text-muted` | 辅助文字 |
-| Text Inverse | `#0F172A` | `--text-inverse` | 深色按钮上的文字 |
+| Background Deep | `#020203` | `--bg-deep` | 页底 |
+| Background Base | `#050506` | `--bg-base` | 页面 |
+| Surface Glass | `rgba(255,255,255,0.06)` | `--glass` | 卡片/面板 |
+| Surface Hover | `rgba(255,255,255,0.10)` | `--glass-hover` | 悬浮态 |
+| Border Glass | `rgba(255,255,255,0.08)` | `--glass-border` | 边框/分割线 |
+| Accent | `#5E6AD2` | `--accent` | 主按钮、链接、进度条 |
+| Accent Glow | `rgba(94,106,210,0.2)` | `--accent-glow` | 发光效果 |
+| Success | `#34D399` | `--success` | 运行中、已发送 |
+| Warning | `#FBBF24` | `--warning` | 暂停状态 |
+| Danger | `#F87171` | `--danger` | 失败、停止 |
+| Text Primary | `#EDEDEF` | `--text` | 正文 |
+| Text Muted | `#8A8F98` | `--text-muted` | 辅助文字 |
 
 ## Typography
 
-- **Heading**: Fira Code (500-700) — 状态标签、数字、代码
-- **Body**: Fira Sans (400-500) — 正文、按钮、标签
-- **Chinese Fallback**: `'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC'`
-- **Base Size**: 14px body, 11-13px labels, 16-24px headings
-- **Line Height**: 1.5 body, 1.25 heading
+- **Family**: Inter (300/400/500/600) — single font, weight-driven hierarchy
+- **Chinese Fallback**: `'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC'`
+- **Heading**: 600 weight, 16-24px
+- **Body**: 400 weight, 13-14px
+- **Mono**: SF Mono / ui-monospace for UID/data numbers
+- **Line Height**: 1.5 (body), 1.25 (heading)
 
-## Spacing Scale (4dp)
+## Spacing
 
-4, 8, 12, 16, 20, 24, 32, 40, 48
+4, 8, 12, 16, 20, 24, 32, 44, 56
 
-## Effects
+## Corners
 
-- Card hover: border-color transition 200ms + subtle glow
-- Button press: scale(0.97) 100ms
-- Progress bar: width transition 400ms ease-out
-- Modal: backdrop blur + scale+fade enter 200ms
-- Status pulse: running indicator pulse animation 2s
+- Cards/panels: 16px
+- Buttons: 10px
+- Modals: 20px
+- Inputs: 8px
+
+## Glass Effects
+
+- **Card**: `background: rgba(255,255,255,0.05)`, `backdrop-filter: blur(24px)`, `border: 1px solid rgba(255,255,255,0.08)`
+- **Modal**: `background: rgba(10,10,12,0.92)`, `backdrop-filter: blur(44px) saturate(180%)`
+- **Top bar**: `background: rgba(5,5,6,0.75)`, `backdrop-filter: blur(20px) saturate(180%)`
+
+## Animations (Apple Spring)
+
+- **Easing**: `cubic-bezier(0.16, 1, 0.3, 1)` — Apple's standard deceleration curve
+- **Card hover**: `transform: translateY(-2px)` + accent border glow, 250ms
+- **Button press**: `scale(0.97)`, 100ms
+- **Modal enter**: `scale(0.92)` → `scale(1)` + opacity 0→1, 300ms spring
+- **Progress bar**: width transition 500ms cubic-bezier
+- **Page load**: staggered card enter (30ms stagger per card)
 
 ## Icons
 
-Use inline SVG only. No emojis. Source: Lucide-style (24px, stroke-width 2).
-
-## Status Colors
-
-| Status | Color | Usage |
-|--------|-------|-------|
-| Running | `--success` `#22C55E` | 运行中卡片边框、状态标签 |
-| Paused | `--accent` `#F59E0B` | 暂停卡片边框、状态标签 |
-| Idle | `--text-muted` `#94A3B8` | 待开始状态标签 |
-| Error/Failed | `--danger` `#EF4444` | 失败数、错误状态 |
+Inline SVG only. Lucide-style (24px, stroke-width 1.5-2). No emojis.
