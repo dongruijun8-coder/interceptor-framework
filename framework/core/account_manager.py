@@ -1,12 +1,26 @@
 """App 账号管理 — 多账号存储、SMS 登录、激活切换"""
+import base64
 import json
 from pathlib import Path
 from typing import Optional
 
 import requests
 import urllib3
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+ENCRYPT_KEY = "popokey202200000"
+AES_IV = "\x00" * 16
+ENCRYPT_PREFIX = "encrypt-"
+
+
+def encrypt_phone(phone: str) -> str:
+    cipher = AES.new(ENCRYPT_KEY.encode("utf-8"), AES.MODE_CBC, AES_IV.encode("utf-8"))
+    padded = pad(phone.encode("utf-8"), AES.block_size)
+    encrypted = cipher.encrypt(padded)
+    return ENCRYPT_PREFIX + base64.b64encode(encrypted).decode("utf-8")
 
 
 class AccountManager:
@@ -17,6 +31,10 @@ class AccountManager:
         self._accounts_path = self.state_dir / "accounts.json"
         self.session = requests.Session()
         self.session.verify = False
+        self.session.headers.update({
+            "Content-Type": "application/json; charset=UTF-8",
+            "User-Agent": "okhttp/3.14.9",
+        })
 
     # ═══ Account CRUD ═══
 
@@ -73,28 +91,30 @@ class AccountManager:
         # fallback: first account
         return accounts[0] if accounts else None
 
-    def _build_body(self, app_config: dict, params: dict = None) -> dict:
-        """构造标准请求体 — 含所有设备指纹字段"""
+    def _make_public_body(self, app_config: dict, params: dict = None) -> dict:
+        """构造公开请求体 — 不含 token/uid，用于短信/登录"""
         return {
-            "app": "plpl",
+            "app": app_config.get("app", "plpl"),
             "build": app_config.get("build", 126),
             "channel": app_config.get("channel", "plpl_baidu"),
-            "version": app_config.get("version", "1.7.40"),
-            "platform": "Android",
-            "subChannel": "",
-            "patchVersion": "",
-            "sysVersion": app_config.get("sysVersion", "12"),
             "meid": app_config.get("device_id", ""),
             "device": app_config.get("device", "SM-S9210"),
-            "imei": app_config.get("device_id", ""),
+            "platform": app_config.get("platform", "Android"),
+            "subChannel": "",
+            "token": "",
+            "uid": 0,
+            "version": app_config.get("version", "1.7.40"),
+            "patchVersion": "",
+            "sysVersion": app_config.get("sysVersion", "12"),
             "params": params or {},
         }
 
     def send_sms(self, base_url: str, phone: str, captcha_validate: str, app_config: dict) -> dict:
         """发送短信验证码 — 需先完成易盾滑块验证"""
-        body = self._build_body(app_config, {
-            "phone": phone,
-            "captcha": captcha_validate,
+        body = self._make_public_body(app_config, {
+            "authenticate": captcha_validate,
+            "contryCode": "+86",
+            "phoneNumber": encrypt_phone(phone),
         })
         resp = self._post(f"{base_url}/plpl/tour/sms", body)
         if self._check(resp):
@@ -103,27 +123,45 @@ class AccountManager:
 
     def sms_login(self, base_url: str, phone: str, sms_code: str, app_config: dict) -> dict:
         """SMS 登录流程：查关联账号 → 登录 → 返回 token+uid"""
+        meid = app_config.get("device_id", "")
+        enc_phone = encrypt_phone(phone)
+
+        def _post_login(path: str, params: dict) -> dict:
+            body = self._make_public_body(app_config, params)
+            body["imei"] = meid
+            r = self.session.post(f"{base_url}{path}", json=body, timeout=30)
+            return r.json()
+
         # Step 1: 查询关联账号，获取 tid
-        resp1 = self._post(f"{base_url}/plpl/ptl/relation/account/list",
-            self._build_body(app_config, {"phone": phone, "smsCode": sms_code}))
-        if not self._check(resp1):
-            return {"success": False, "error": f"查询账号失败: {resp1.get('message', '')}"}
-
-        accounts_data = resp1.get("data", {})
-        account_list = accounts_data.get("list", accounts_data.get("accounts", []))
-        if not account_list:
-            return {"success": False, "error": "该手机号无关联账号，请先注册"}
-
-        tid = account_list[0].get("uid", account_list[0].get("tid", ""))
+        tid = 0
+        resp1 = _post_login("/plpl/ptl/relation/account/list", {
+            "contryCode": "+86",
+            "phoneNumber": enc_phone,
+            "smsCode": sms_code,
+            "inviteRedpackCode": "",
+            "tid": 0,
+        })
+        if self._check(resp1):
+            accts = resp1.get("data", {}).get("list", [])
+            if accts:
+                tid = accts[0].get("uid", 0)
 
         # Step 2: 登录获取 token
-        resp2 = self._post(f"{base_url}/plpl/ptl/login/relation/account",
-            self._build_body(app_config, {"phone": phone, "smsCode": sms_code, "tid": tid}))
+        resp2 = _post_login("/plpl/ptl/login/relation/account", {
+            "contryCode": "+86",
+            "phoneNumber": enc_phone,
+            "smsCode": sms_code,
+            "inviteRedpackCode": "",
+            "tid": tid,
+        })
         if not self._check(resp2):
-            return {"success": False, "error": f"登录失败: {resp2.get('message', '')}"}
+            code = resp2.get("code", "")
+            if code == "F_NEED_REG":
+                return {"success": False, "error": "该号码未注册，请先在 App 上注册"}
+            return {"success": False, "error": f"登录失败: {resp2.get('message', code)}"}
 
         data = resp2.get("data", {})
-        user = data.get("fullUser", data.get("user", data))
+        user = data.get("fullUser", {}).get("user", data.get("user", data))
         token = data.get("token", "")
         uid = user.get("uid", tid)
 
@@ -137,15 +175,11 @@ class AccountManager:
             "success": True,
             "token": token,
             "uid": str(uid),
-            "nick": user.get("nick", user.get("nickName", "")),
+            "nick": user.get("nick", user.get("nickName", user.get("name", ""))),
         }
 
     def _post(self, url: str, body: dict) -> dict:
-        r = self.session.post(
-            url, json=body,
-            headers={"Content-Type": "application/json"},
-            timeout=30,
-        )
+        r = self.session.post(url, json=body, timeout=30)
         return r.json()
 
     def _check(self, resp: dict) -> bool:
