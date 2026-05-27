@@ -1,6 +1,8 @@
 """每 App 独立 .state/ 目录读写 — rooms_cache / sent_today / progress"""
 import json
+import os
 import sys
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
@@ -21,7 +23,14 @@ class StateManager:
             return default
 
     def _write_json(self, path: Path, data) -> None:
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        content = json.dumps(data, ensure_ascii=False, indent=2)
+        fd, tmp = tempfile.mkstemp(dir=self.state_dir, suffix=".tmp")
+        try:
+            os.write(fd, content.encode("utf-8"))
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp, path)
 
     def load_rooms(self) -> list:
         if not self._rooms_path.exists():
@@ -36,8 +45,10 @@ class StateManager:
         if not self._sent_path.exists():
             return default
         data = self._read_json(self._sent_path, default)
-        if data.get("date") != str(date.today()):
+        if "date" not in data or data["date"] != str(date.today()):
             return default
+        if "sent" not in data:
+            data["sent"] = []
         return data
 
     def is_sent_today(self, uid: str) -> bool:

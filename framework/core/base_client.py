@@ -18,6 +18,11 @@ class BaseClient(ABC):
 
         self.config_path = Path(config_path)
         self.config = json.loads(self.config_path.read_text(encoding="utf-8"))
+
+        missing = [k for k in ("app_name",) if k not in self.config]
+        if missing:
+            raise KeyError(f"[{config_path}] 缺少必填字段: {missing}")
+
         self.app_name = self.config["app_name"]
         self.state = StateManager(str(self.config_path.parent))
 
@@ -60,7 +65,10 @@ class BaseClient(ABC):
         mode = self.config.get("auth_mode", "manual")
         if mode == "manual":
             return bool(self.config.get("token") and self.config.get("uid"))
-        return False
+        raise NotImplementedError(
+            f"App '{self.app_name}' 使用 auth_mode='{mode}'，"
+            f"需要子类重写 authenticate() 实现该认证方式"
+        )
 
     def build_headers(self) -> dict:
         return {
@@ -121,10 +129,7 @@ class BaseClient(ABC):
             start_idx = self._progress.get("current_room_index", 0)
 
         for idx in range(start_idx, len(self._rooms)):
-            if not self._running:
-                break
-            self._pause_event.wait()
-            if not self._running:
+            if not self._wait_if_paused():
                 break
             room = self._rooms[idx]
             self._notify("progress", {"current_room_index": idx, "room": room})
@@ -157,10 +162,7 @@ class BaseClient(ABC):
         users.sort(key=lambda u: u.get("amount", 0), reverse=True)
 
         for user in users:
-            if not self._running:
-                break
-            self._pause_event.wait()
-            if not self._running:
+            if not self._wait_if_paused():
                 break
 
             uid = user.get("uid", "")
@@ -196,6 +198,18 @@ class BaseClient(ABC):
 
             time.sleep(self._interval)
 
+    # ═══ 控制辅助 ═══
+
+    def _wait_if_paused(self) -> bool:
+        """Block until resumed. Returns True if still running, False if stopped."""
+        self._pause_event.wait()
+        return self._running
+
+    def refresh_rooms(self) -> list:
+        self._rooms = self.fetch_all_rooms()
+        self.state.save_rooms(self._rooms)
+        return self._rooms
+
     # ═══ 控制 ═══
 
     def start(self) -> None:
@@ -211,6 +225,11 @@ class BaseClient(ABC):
     def stop(self) -> None:
         self._running = False
         self._pause_event.set()
+
+    def reset_progress(self) -> None:
+        with self._lock:
+            self._progress = {}
+            self.state.reset_progress()
 
     @property
     def status(self) -> str:

@@ -25,13 +25,14 @@ class TaskManager:
                     self._tasks[app_id] = client
 
     def _load_client(self, app_id: str) -> Optional[BaseClient]:
+        config_path = str(self.apps_dir / app_id / "config.json")
         try:
             mod = importlib.import_module(f"apps.{app_id}.client")
             for name in dir(mod):
                 obj = getattr(mod, name)
                 if (isinstance(obj, type) and issubclass(obj, BaseClient)
                         and obj is not BaseClient):
-                    return obj()
+                    return obj(config_path)
         except Exception as e:
             print(f"[TaskManager] 加载 {app_id} 失败: {e}")
         return None
@@ -57,7 +58,7 @@ class TaskManager:
         if not task:
             return False
         task.stop()
-        task.state.reset_progress()
+        task.reset_progress()
         return True
 
     def rescan_rooms(self, app_id: str) -> bool:
@@ -65,8 +66,7 @@ class TaskManager:
         if not task:
             return False
         try:
-            task._rooms = task.fetch_all_rooms()
-            task.state.save_rooms(task._rooms)
+            task.refresh_rooms()
             return True
         except Exception as e:
             print(f"[TaskManager] 重新扫描 {app_id} 失败: {e}")

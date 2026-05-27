@@ -54,11 +54,19 @@ class AccountManager:
         )
 
     def add_account(self, phone: str, token: str, uid: str, label: str = "") -> dict:
+        uid = str(uid)
         accounts = self.load_accounts()
+        for a in accounts:
+            if a["uid"] == uid:
+                a["token"] = token
+                a["phone"] = phone
+                a["label"] = label or phone
+                self._save_accounts(accounts)
+                return a
         account = {
             "phone": phone,
             "token": token,
-            "uid": str(uid),
+            "uid": uid,
             "label": label or phone,
             "active": False,
         }

@@ -5,9 +5,10 @@ from framework.core.base_client import BaseClient
 
 
 class PiaopiaoClient(BaseClient):
-    def __init__(self):
-        config_path = Path(__file__).parent / "config.json"
-        super().__init__(str(config_path))
+    def __init__(self, config_path: str = None):
+        if config_path is None:
+            config_path = str(Path(__file__).parent / "config.json")
+        super().__init__(config_path)
 
     # ═══ 3 个必须方法 ═══
 
@@ -66,14 +67,6 @@ class PiaopiaoClient(BaseClient):
         if self.check_response(resp):
             return {"success": True, "error": ""}
         return {"success": False, "error": resp.get("message", "send failed")}
-
-    # ═══ 认证 ═══
-
-    def authenticate(self) -> bool:
-        cfg = self.config
-        if cfg.get("auth_mode") == "manual":
-            return bool(cfg.get("token") and cfg.get("uid"))
-        return super().authenticate()
 
     # ═══ 内部分页 ═══
 

@@ -1,5 +1,7 @@
 """Flask 统一面板 — REST API + HTML 页面渲染"""
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -16,6 +18,17 @@ HOMEPAGE_HTML = SPEC_DIR / "homepage.html"
 DETAIL_HTML = SPEC_DIR / "design-mockup.html"
 
 APPS_DIR = Path(__file__).resolve().parent.parent.parent / "apps"
+
+
+def _atomic_write_json(path: Path, data) -> None:
+    content = json.dumps(data, ensure_ascii=False, indent=2)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        os.write(fd, content.encode("utf-8"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(tmp, str(path))
 
 
 # ═══ Task API ═══
@@ -99,10 +112,9 @@ def api_accounts_login(app_id):
     result = am.sms_login(base_url, phone, sms_code, config)
 
     if result.get("success"):
-        # Update config.json with fresh token
         config["token"] = result["token"]
         config["uid"] = result["uid"]
-        config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write_json(config_path, config)
 
     return jsonify(result)
 
@@ -141,7 +153,6 @@ def api_accounts_activate(app_id, uid):
     am = _get_account_manager(app_id)
     ok = am.activate_account(uid)
     if ok:
-        # Update config.json with activated account
         active = am.get_active_account()
         if active:
             config_path = APPS_DIR / app_id / "config.json"
@@ -149,7 +160,7 @@ def api_accounts_activate(app_id, uid):
                 config = json.loads(config_path.read_text(encoding="utf-8"))
                 config["token"] = active["token"]
                 config["uid"] = active["uid"]
-                config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+                _atomic_write_json(config_path, config)
     return jsonify({"success": ok})
 
 
