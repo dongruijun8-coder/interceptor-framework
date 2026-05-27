@@ -34,6 +34,8 @@ class AccountManager:
         self.session.headers.update({
             "Content-Type": "application/json; charset=UTF-8",
             "User-Agent": "okhttp/3.14.9",
+            "Accept-Encoding": "gzip",
+            "Connection": "Keep-Alive",
         })
 
     # ═══ Account CRUD ═══
