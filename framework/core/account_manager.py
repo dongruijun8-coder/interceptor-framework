@@ -73,21 +73,39 @@ class AccountManager:
         # fallback: first account
         return accounts[0] if accounts else None
 
-    # ═══ SMS Login ═══
+    def _build_body(self, app_config: dict, params: dict = None) -> dict:
+        """构造标准请求体 — 含所有设备指纹字段"""
+        return {
+            "app": "plpl",
+            "build": app_config.get("build", 126),
+            "channel": app_config.get("channel", "plpl_baidu"),
+            "version": app_config.get("version", "1.7.40"),
+            "platform": "Android",
+            "subChannel": "",
+            "patchVersion": "",
+            "sysVersion": app_config.get("sysVersion", "12"),
+            "meid": app_config.get("device_id", ""),
+            "device": app_config.get("device", "SM-S9210"),
+            "imei": app_config.get("device_id", ""),
+            "params": params or {},
+        }
+
+    def send_sms(self, base_url: str, phone: str, captcha_validate: str, app_config: dict) -> dict:
+        """发送短信验证码 — 需先完成易盾滑块验证"""
+        body = self._build_body(app_config, {
+            "phone": phone,
+            "captcha": captcha_validate,
+        })
+        resp = self._post(f"{base_url}/plpl/tour/sms", body)
+        if self._check(resp):
+            return {"success": True, "error": ""}
+        return {"success": False, "error": resp.get("message", "发送验证码失败")}
 
     def sms_login(self, base_url: str, phone: str, sms_code: str, app_config: dict) -> dict:
         """SMS 登录流程：查关联账号 → 登录 → 返回 token+uid"""
-        build = app_config.get("build", 126)
-        channel = app_config.get("channel", "plpl_baidu")
-        version = app_config.get("version", "1.7.40")
-        imei = app_config.get("device_id", phone)
-
         # Step 1: 查询关联账号，获取 tid
-        resp1 = self._post(f"{base_url}/plpl/ptl/relation/account/list", {
-            "app": "plpl", "build": build, "channel": channel,
-            "version": version, "imei": imei,
-            "params": {"phone": phone, "smsCode": sms_code},
-        })
+        resp1 = self._post(f"{base_url}/plpl/ptl/relation/account/list",
+            self._build_body(app_config, {"phone": phone, "smsCode": sms_code}))
         if not self._check(resp1):
             return {"success": False, "error": f"查询账号失败: {resp1.get('message', '')}"}
 
@@ -99,11 +117,8 @@ class AccountManager:
         tid = account_list[0].get("uid", account_list[0].get("tid", ""))
 
         # Step 2: 登录获取 token
-        resp2 = self._post(f"{base_url}/plpl/ptl/login/relation/account", {
-            "app": "plpl", "build": build, "channel": channel,
-            "version": version, "imei": imei,
-            "params": {"phone": phone, "smsCode": sms_code, "tid": tid},
-        })
+        resp2 = self._post(f"{base_url}/plpl/ptl/login/relation/account",
+            self._build_body(app_config, {"phone": phone, "smsCode": sms_code, "tid": tid}))
         if not self._check(resp2):
             return {"success": False, "error": f"登录失败: {resp2.get('message', '')}"}
 
@@ -115,7 +130,6 @@ class AccountManager:
         if not token or not uid:
             return {"success": False, "error": "登录返回缺少 token 或 uid"}
 
-        # Save account
         self.add_account(phone, token, str(uid), label=phone)
         self.activate_account(str(uid))
 
@@ -125,25 +139,6 @@ class AccountManager:
             "uid": str(uid),
             "nick": user.get("nick", user.get("nickName", "")),
         }
-
-    def send_sms(self, base_url: str, phone: str, captcha_validate: str, app_config: dict) -> dict:
-        """发送短信验证码 — 需先完成易盾滑块验证"""
-        build = app_config.get("build", 126)
-        channel = app_config.get("channel", "plpl_baidu")
-        version = app_config.get("version", "1.7.40")
-        imei = app_config.get("device_id", phone)
-
-        resp = self._post(f"{base_url}/plpl/tour/sms", {
-            "app": "plpl", "build": build, "channel": channel,
-            "version": version, "imei": imei,
-            "params": {
-                "phone": phone,
-                "captcha": captcha_validate,
-            },
-        })
-        if self._check(resp):
-            return {"success": True, "error": ""}
-        return {"success": False, "error": resp.get("message", "发送验证码失败")}
 
     def _post(self, url: str, body: dict) -> dict:
         r = self.session.post(

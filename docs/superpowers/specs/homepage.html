@@ -655,10 +655,12 @@ initNECaptcha({
         errEl.textContent = '发送失败: ' + (d.error || '未知');
         errEl.style.color = 'var(--danger)';
         document.getElementById('smsBtn').disabled = false;
+        if (captchaIns) captchaIns.refresh();
       }
     }).catch(function(e){
       errEl.textContent = '网络错误: ' + e.message; errEl.style.color = 'var(--danger)';
       document.getElementById('smsBtn').disabled = false;
+      if (captchaIns) captchaIns.refresh();
     });
   }
 }, function(instance) { captchaIns = instance; });
