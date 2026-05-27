@@ -107,6 +107,28 @@ def api_accounts_login(app_id):
     return jsonify(result)
 
 
+@app.route("/api/app/<app_id>/accounts/send-sms", methods=["POST"])
+def api_accounts_send_sms(app_id):
+    data = request.get_json() or {}
+    phone = data.get("phone", "").strip()
+    captcha_validate = data.get("authenticate", "").strip()
+    if not phone or not captcha_validate:
+        return jsonify({"success": False, "error": "手机号和滑块验证不能为空"}), 400
+
+    config_path = APPS_DIR / app_id / "config.json"
+    if not config_path.exists():
+        return jsonify({"success": False, "error": "App 配置不存在"}), 404
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    base_url = config.get("base_url", "")
+    if not base_url:
+        return jsonify({"success": False, "error": "config.json 缺少 base_url"}), 400
+
+    am = _get_account_manager(app_id)
+    result = am.send_sms(base_url, phone, captcha_validate, config)
+    return jsonify(result)
+
+
 @app.route("/api/app/<app_id>/accounts/<uid>", methods=["DELETE"])
 def api_accounts_remove(app_id, uid):
     am = _get_account_manager(app_id)

@@ -126,6 +126,25 @@ class AccountManager:
             "nick": user.get("nick", user.get("nickName", "")),
         }
 
+    def send_sms(self, base_url: str, phone: str, captcha_validate: str, app_config: dict) -> dict:
+        """发送短信验证码 — 需先完成易盾滑块验证"""
+        build = app_config.get("build", 126)
+        channel = app_config.get("channel", "plpl_baidu")
+        version = app_config.get("version", "1.7.40")
+        imei = app_config.get("device_id", phone)
+
+        resp = self._post(f"{base_url}/plpl/tour/sms", {
+            "app": "plpl", "build": build, "channel": channel,
+            "version": version, "imei": imei,
+            "params": {
+                "phone": phone,
+                "captcha": captcha_validate,
+            },
+        })
+        if self._check(resp):
+            return {"success": True, "error": ""}
+        return {"success": False, "error": resp.get("message", "发送验证码失败")}
+
     def _post(self, url: str, body: dict) -> dict:
         r = self.session.post(
             url, json=body,

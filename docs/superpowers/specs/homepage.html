@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cstaticdun.126.net/load.min.js"></script>
 <style>
 :root {
   --bg:        #F5F5F7;
@@ -278,7 +279,11 @@ body::before {
 </div>
 <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:16px">
   <h4 style="font-size:13px;font-weight:600;margin-bottom:12px">SMS 登录</h4>
-  <label>手机号</label><input id="acctPhone" placeholder="13800138000" autocomplete="off">
+  <label>手机号</label>
+  <div style="display:flex;gap:8px">
+    <input id="acctPhone" placeholder="13800138000" autocomplete="off" style="flex:1">
+    <div class="btn btn-primary" id="smsBtn" onclick="sendSms()" style="white-space:nowrap">发送验证码</div>
+  </div>
   <label>短信验证码</label><input id="acctSmsCode" placeholder="输入收到的验证码" autocomplete="off">
   <div id="acctLoginError" style="color:var(--danger);font-size:12px;margin-top:8px;display:none"></div>
   <div class="btn-row" style="margin-top:14px;justify-content:flex-end">
@@ -619,23 +624,77 @@ function removeAccount(appId, uid) {
       else { toast('删除失败'); }
     });
 }
+// ═══ Captcha + SMS ═══
+var captchaIns = null;
+var _smsAppId = null;
+
+initNECaptcha({
+  captchaId: "00f73f5df79d4839bcd0bffc20f5a1e1",
+  element: document.body,
+  mode: "popup",
+  apiVersion: 2,
+  onVerify: function(err, data) {
+    var errEl = document.getElementById('acctLoginError');
+    if (err) { errEl.textContent = '滑块验证未通过，请重试'; errEl.style.display = ''; document.getElementById('smsBtn').disabled = false; return; }
+    errEl.style.display = ''; errEl.style.color = 'var(--accent)'; errEl.textContent = '验证通过，发送中...';
+    fetch('/api/app/'+encodeURIComponent(_smsAppId)+'/accounts/send-sms', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({phone: document.getElementById('acctPhone').value.trim(), authenticate: data.validate})
+    }).then(function(r){return r.json()}).then(function(d){
+      if (d.success) {
+        errEl.textContent = '验证码已发送，请查收短信';
+        errEl.style.color = 'var(--success)';
+        var btn = document.getElementById('smsBtn'), s = 60;
+        btn.textContent = s + 's'; btn.disabled = true;
+        var t = setInterval(function(){
+          s--; btn.textContent = s + 's';
+          if (s<=0){ clearInterval(t); btn.textContent = '发送验证码'; btn.disabled = false; }
+        }, 1000);
+      } else {
+        errEl.textContent = '发送失败: ' + (d.error || '未知');
+        errEl.style.color = 'var(--danger)';
+        document.getElementById('smsBtn').disabled = false;
+      }
+    }).catch(function(e){
+      errEl.textContent = '网络错误: ' + e.message; errEl.style.color = 'var(--danger)';
+      document.getElementById('smsBtn').disabled = false;
+    });
+  }
+}, function(instance) { captchaIns = instance; });
+
+function sendSms() {
+  var phone = document.getElementById('acctPhone').value.trim();
+  var errEl = document.getElementById('acctLoginError');
+  if (!phone) { errEl.textContent = '请输入手机号'; errEl.style.color = 'var(--danger)'; errEl.style.display = ''; return; }
+  if (!captchaIns) { errEl.textContent = '验证组件未加载，请刷新页面'; errEl.style.color = 'var(--danger)'; errEl.style.display = ''; return; }
+  _smsAppId = document.getElementById('acctAppSelect').value;
+  errEl.style.display = ''; errEl.style.color = 'var(--text-muted)'; errEl.textContent = '请完成滑块验证...';
+  document.getElementById('smsBtn').disabled = true;
+  captchaIns.verify();
+}
+
 function doLogin() {
   var appId = document.getElementById('acctAppSelect').value;
   var phone = document.getElementById('acctPhone').value.trim();
   var smsCode = document.getElementById('acctSmsCode').value.trim();
   var errEl = document.getElementById('acctLoginError');
   errEl.style.display = 'none';
-  if (!phone || !smsCode) { errEl.textContent = '手机号和验证码不能为空'; errEl.style.display = ''; return; }
+  if (!phone || !smsCode) { errEl.textContent = '手机号和验证码不能为空'; errEl.style.color = 'var(--danger)'; errEl.style.display = ''; return; }
+  errEl.style.display = ''; errEl.style.color = 'var(--text-muted)'; errEl.textContent = '登录中...';
   fetch('/api/app/'+encodeURIComponent(appId)+'/accounts/login', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({phone:phone,sms_code:smsCode})
   }).then(function(r){return r.json()}).then(function(d){
     if (d.success) {
-      toast('登录成功: '+d.nick); closeAccountModal(); fetchApps();
+      errEl.style.color = 'var(--success)'; errEl.textContent = '登录成功! UID: ' + d.uid;
+      toast('登录成功: '+ (d.nick || d.uid)); closeAccountModal(); fetchApps();
     } else {
-      errEl.textContent = d.error || '登录失败'; errEl.style.display = '';
+      errEl.textContent = d.error || '登录失败'; errEl.style.color = 'var(--danger)';
     }
+  }).catch(function(e){
+    errEl.textContent = '网络错误: ' + e.message; errEl.style.color = 'var(--danger)';
   });
 }
 
