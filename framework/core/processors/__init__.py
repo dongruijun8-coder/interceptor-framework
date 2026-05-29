@@ -2,3 +2,4 @@
 # Imports added incrementally as each processor is created (Tasks 2-7)
 from .encryption.plaintext import PlaintextEncryption
 from .signing.plaintext import PlaintextSigning
+from .auth.manual_token import ManualTokenAuth
