@@ -3,3 +3,5 @@
 from .encryption.plaintext import PlaintextEncryption
 from .signing.plaintext import PlaintextSigning
 from .auth.manual_token import ManualTokenAuth
+from .messaging.rest_json import RestJsonMessaging
+from .messaging.none import NoneMessaging
