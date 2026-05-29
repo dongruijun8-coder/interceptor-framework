@@ -7,3 +7,4 @@ from .signing.xor_triple import XorTripleSigning
 from .auth.manual_token import ManualTokenAuth
 from .messaging.rest_json import RestJsonMessaging
 from .messaging.none import NoneMessaging
+from .auth.password_login import PasswordLoginAuth
