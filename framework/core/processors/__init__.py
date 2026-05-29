@@ -3,6 +3,7 @@
 from .encryption.plaintext import PlaintextEncryption
 from .encryption.aes_cbc import AesCbcEncryption
 from .signing.plaintext import PlaintextSigning
+from .signing.xor_triple import XorTripleSigning
 from .auth.manual_token import ManualTokenAuth
 from .messaging.rest_json import RestJsonMessaging
 from .messaging.none import NoneMessaging
