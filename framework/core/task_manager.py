@@ -1,5 +1,5 @@
-"""多 App 任务调度 — 自动发现、启动/暂停/停止/状态查询"""
-import importlib
+"""多 App 任务调度 — 从 apps/ 读取 config.json 发现 App"""
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -18,24 +18,34 @@ class TaskManager:
         if not self.apps_dir.exists():
             return
         for item in sorted(self.apps_dir.iterdir()):
-            if item.is_dir() and (item / "config.json").exists():
-                app_id = item.name
-                client = self._load_client(app_id)
-                if client:
-                    self._tasks[app_id] = client
+            if not item.is_dir():
+                continue
+            config_file = item / "config.json"
+            if not config_file.exists():
+                continue
+            app_id = item.name
+            try:
+                client = BaseClient(str(config_file))
+                self._tasks[app_id] = client
+            except Exception as e:
+                print(f"[TaskManager] 加载 {app_id} 失败: {e}")
 
-    def _load_client(self, app_id: str) -> Optional[BaseClient]:
-        config_path = str(self.apps_dir / app_id / "config.json")
+    def register(self, app_id: str, config_path: str) -> bool:
+        """动态注册新 App（Web 上传后调用）"""
         try:
-            mod = importlib.import_module(f"apps.{app_id}.client")
-            for name in dir(mod):
-                obj = getattr(mod, name)
-                if (isinstance(obj, type) and issubclass(obj, BaseClient)
-                        and obj is not BaseClient):
-                    return obj(config_path)
+            client = BaseClient(config_path)
+            self._tasks[app_id] = client
+            return True
         except Exception as e:
-            print(f"[TaskManager] 加载 {app_id} 失败: {e}")
-        return None
+            print(f"[TaskManager] 注册 {app_id} 失败: {e}")
+            return False
+
+    def unregister(self, app_id: str) -> bool:
+        if app_id in self._tasks:
+            task = self._tasks.pop(app_id)
+            task.stop()
+            return True
+        return False
 
     # ═══ 控制 ═══
 
