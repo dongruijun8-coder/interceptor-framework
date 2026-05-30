@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>App 管理 — 截流看板</title>
+<style>
+:root {
+  --bg-deep: #020203;
+  --bg-base: #050506;
+  --glass: rgba(255,255,255,0.06);
+  --glass-hover: rgba(255,255,255,0.10);
+  --glass-border: rgba(255,255,255,0.08);
+  --accent: #5E6AD2;
+  --accent-glow: rgba(94,106,210,0.2);
+  --success: #34D399;
+  --warning: #FBBF24;
+  --danger: #F87171;
+  --text: #EDEDEF;
+  --text-muted: #8A8F98;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg-deep); color: var(--text);
+  min-height: 100vh; padding: 44px 24px 24px;
+}
+h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+h2 { font-size: 14px; font-weight: 500; color: var(--text-muted); margin-bottom: 24px; }
+.container { max-width: 900px; margin: 0 auto; }
+.card {
+  background: var(--glass); backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border); border-radius: 16px;
+  padding: 20px; margin-bottom: 16px;
+}
+.row { display: flex; gap: 16px; flex-wrap: wrap; }
+.col { flex: 1; min-width: 280px; }
+.upload-zone {
+  border: 2px dashed var(--glass-border); border-radius: 12px;
+  padding: 44px 24px; text-align: center; cursor: pointer;
+  transition: all 200ms ease;
+}
+.upload-zone:hover { border-color: var(--accent); background: var(--accent-glow); }
+.upload-zone.drag { border-color: var(--accent); background: var(--accent-glow); }
+.upload-zone p { margin-top: 8px; font-size: 14px; color: var(--text-muted); }
+.upload-zone .icon { font-size: 32px; }
+.btn {
+  display: inline-block; padding: 8px 16px; border-radius: 10px;
+  font-size: 13px; font-weight: 500; cursor: pointer; border: none;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { filter: brightness(1.15); }
+.btn-ghost { background: transparent; border: 1px solid var(--glass-border); color: var(--text); }
+.btn-ghost:hover { background: var(--glass-hover); }
+.btn-danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+.status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+.status.registered { background: var(--success); }
+.status.error { background: var(--danger); }
+.log { margin-top: 12px; max-height: 300px; overflow-y: auto; font-size: 12px; font-family: ui-monospace, monospace; }
+.log .error { color: var(--danger); }
+.log .warn { color: var(--warning); }
+.log .ok { color: var(--success); }
+.app-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--glass-border); }
+.app-item:last-child { border-bottom: none; }
+.hidden { display: none; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="container">
+  <a href="/" style="font-size:12px;color:var(--text-muted)">← 返回看板</a>
+  <h1>App 管理</h1>
+  <h2>上传 JSON 配置文件接入新平台</h2>
+
+  <div class="row">
+    <div class="col">
+      <div class="card">
+        <h3 style="margin-bottom:12px">已安装</h3>
+        <div id="installedList">加载中...</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <h3 style="margin-bottom:12px">上传配置</h3>
+        <div class="upload-zone" id="uploadZone">
+          <div class="icon">+</div>
+          <p>拖拽 JSON 文件到此处<br>或点击选择文件</p>
+          <input type="file" id="fileInput" accept=".json" style="display:none">
+        </div>
+        <div id="validationResult" class="hidden" style="margin-top:12px"></div>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button class="btn btn-primary hidden" id="activateBtn" onclick="activateApp()">激活并注册</button>
+          <button class="btn btn-ghost hidden" id="testBtn" onclick="testConnection()">测试连接</button>
+        </div>
+        <div id="testResult" class="hidden" style="margin-top:8px;font-size:12px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var uploadedConfig = null;
+var uploadedName = '';
+
+// Init
+fetch('/api/apps').then(r=>r.json()).then(data => {
+  var list = document.getElementById('installedList');
+  if (!data.length) { list.innerHTML = '<p style="color:var(--text-muted)">暂无已安装 App</p>'; return; }
+  list.innerHTML = data.map(s =>
+    '<div class="app-item">' +
+    '<div><strong>' + s.app_name + '</strong><br><span style="font-size:11px;color:var(--text-muted)">' +
+    '状态: ' + s.status + ' | 房间: ' + s.done_rooms + '/' + s.total_rooms + ' | 已发: ' + s.sent + '</span></div>' +
+    '<div>' +
+    '<a href="/app/' + s.app_name + '" style="margin-right:12px">详情</a>' +
+    '<a href="#" onclick="deleteApp(\'' + s.app_name + '\');return false" style="color:var(--danger)">删除</a>' +
+    '</div></div>'
+  ).join('');
+});
+
+// Upload zone
+var zone = document.getElementById('uploadZone');
+var fileInp = document.getElementById('fileInput');
+
+zone.addEventListener('click', function(){ fileInp.click(); });
+zone.addEventListener('dragover', function(e){ e.preventDefault(); zone.classList.add('drag'); });
+zone.addEventListener('dragleave', function(){ zone.classList.remove('drag'); });
+zone.addEventListener('drop', function(e){ e.preventDefault(); zone.classList.remove('drag'); handleFile(e.dataTransfer.files[0]); });
+fileInp.addEventListener('change', function(){ if(fileInp.files[0]) handleFile(fileInp.files[0]); });
+
+function handleFile(file) {
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      uploadedConfig = JSON.parse(e.target.result);
+      uploadedName = uploadedConfig.meta.app_name;
+      validateAndShow(uploadedName);
+    } catch(err) {
+      uploadedConfig = null;
+      showValidation([], ['JSON 解析失败: ' + err.message]);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function validateAndShow(name) {
+  fetch('/api/apps/upload', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(uploadedConfig)
+  }).then(r=>r.json()).then(data => {
+    if (data.errors && data.errors.length) {
+      showValidation(data.errors, data.warnings || []);
+    } else {
+      showValidation([], data.warnings || []);
+      document.getElementById('activateBtn').classList.remove('hidden');
+      document.getElementById('testBtn').classList.remove('hidden');
+      uploadedName = data.app_id || name;
+    }
+  });
+}
+
+function showValidation(errors, warnings) {
+  var el = document.getElementById('validationResult');
+  el.classList.remove('hidden');
+  var html = '';
+  if (errors.length) {
+    html += '<div style="color:var(--danger);margin-bottom:4px">错误:</div>';
+    errors.forEach(e => { html += '<div class="log error">✕ ' + e + '</div>'; });
+  }
+  if (warnings.length) {
+    html += '<div style="color:var(--warning);margin:8px 0 4px">警告:</div>';
+    warnings.forEach(w => { html += '<div class="log warn">! ' + w + '</div>'; });
+  }
+  if (!errors.length && !warnings.length) {
+    html += '<div class="log ok">✓ 配置校验通过</div>';
+  }
+  el.innerHTML = html;
+}
+
+function activateApp() {
+  if (!uploadedConfig) return;
+  fetch('/api/apps/upload', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(uploadedConfig)
+  }).then(r=>r.json()).then(data => {
+    if (data.success) location.reload();
+    else alert('激活失败: ' + (data.errors || []).join(', '));
+  });
+}
+
+function testConnection() {
+  if (!uploadedName) return;
+  var el = document.getElementById('testResult');
+  el.classList.remove('hidden');
+  el.innerHTML = '<span style="color:var(--text-muted)">测试中...</span>';
+  fetch('/api/apps/' + uploadedName + '/test', {method: 'POST'}).then(r=>r.json()).then(data => {
+    if (data.success) el.innerHTML = '<span class="log ok">✓ 连接成功</span>';
+    else el.innerHTML = '<span class="log error">✕ 连接失败: ' + (data.error || '') + '</span>';
+  });
+}
+
+function deleteApp(name) {
+  if (!confirm('确认删除 ' + name + '？此操作不可恢复。')) return;
+  fetch('/api/apps/' + name, {method: 'DELETE'}).then(r=>r.json()).then(data => {
+    if (data.success) location.reload();
+    else alert('删除失败');
+  });
+}
+</script>
+</body>
+</html>

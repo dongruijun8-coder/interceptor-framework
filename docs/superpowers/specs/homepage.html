@@ -513,8 +513,9 @@ function buildEmptyCard() {
   var div = document.createElement('div');
   div.className = 'card empty';
   div.setAttribute('data-appid', 'empty');
-  div.innerHTML = I.plus + '<div style="font-size:14px;font-weight:500">添加新 App</div><div style="font-size:11px">支持 REST / Frida NIM 模式</div>';
-  div.addEventListener('click', openAddModal);
+  div.innerHTML = I.plus + '<div style="font-size:14px;font-weight:500">添加新 App</div><div style="font-size:11px">上传 JSON 配置即用</div>';
+  div.style.cursor = 'pointer';
+  div.addEventListener('click', function(){ window.location.href='/apps/manage'; });
   return div;
 }
 
