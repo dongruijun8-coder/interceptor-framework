@@ -32,8 +32,8 @@
       }
     },
     "messaging": {
-      "plugin": "none",
-      "params": {}
+      "plugin": "rongcloud-tcp",
+      "params": { "app_key": "m7ua80gbmdddm" }
     }
   },
   "endpoints": {
