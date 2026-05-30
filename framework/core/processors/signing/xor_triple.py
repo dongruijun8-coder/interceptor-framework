@@ -3,7 +3,6 @@ import random
 import time
 
 from ..base import SigningProcessor
-from ...processor_registry import ProcessorRegistry
 
 WRITE_ENDPOINTS = {
     "passwordLogin", "joinRoom", "room/config",
@@ -58,4 +57,3 @@ class XorTripleSigning(SigningProcessor):
         return bytes(a ^ b for a, b in zip(b, extended)).hex()
 
 
-ProcessorRegistry.register(XorTripleSigning)

@@ -1,6 +1,5 @@
 """手动 token 认证 — 直接从 runtime.json 读取 token/uid"""
 from ..base import AuthProcessor
-from ...processor_registry import ProcessorRegistry
 
 
 class ManualTokenAuth(AuthProcessor):
@@ -29,4 +28,3 @@ class ManualTokenAuth(AuthProcessor):
         return True
 
 
-ProcessorRegistry.register(ManualTokenAuth)

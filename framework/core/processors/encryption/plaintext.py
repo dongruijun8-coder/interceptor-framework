@@ -1,7 +1,6 @@
 """明文透传 — 不加密"""
 import json
 from ..base import EncryptionProcessor
-from ...processor_registry import ProcessorRegistry
 
 
 class PlaintextEncryption(EncryptionProcessor):
@@ -18,4 +17,3 @@ class PlaintextEncryption(EncryptionProcessor):
         return json.loads(raw.decode("utf-8"))
 
 
-ProcessorRegistry.register(PlaintextEncryption)

@@ -2,7 +2,6 @@
 import json
 
 from ..base import AuthProcessor
-from ...processor_registry import ProcessorRegistry
 
 
 class PasswordLoginAuth(AuthProcessor):
@@ -85,4 +84,3 @@ class PasswordLoginAuth(AuthProcessor):
         return current
 
 
-ProcessorRegistry.register(PasswordLoginAuth)

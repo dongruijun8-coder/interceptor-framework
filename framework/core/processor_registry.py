@@ -1,5 +1,4 @@
 """处理器注册表 — 单例，按 category/name 索引"""
-from .processors.base import BaseProcessor
 
 
 class ProcessorRegistry:
@@ -11,7 +10,7 @@ class ProcessorRegistry:
         cls._registry[key] = proc_class
 
     @classmethod
-    def load(cls, spec, category: str) -> BaseProcessor:
+    def load(cls, spec, category: str) -> "BaseProcessor":
         # spec can be "plaintext" (str shorthand) or {"plugin": "aes-cbc", "params": {...}}
         if isinstance(spec, str):
             plugin_name = spec

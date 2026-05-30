@@ -1,6 +1,5 @@
 """纯 HTTP REST 私信 — preCheck → send 模式"""
 from ..base import MessagingProcessor
-from ...processor_registry import ProcessorRegistry
 
 
 class RestJsonMessaging(MessagingProcessor):
@@ -45,4 +44,3 @@ class RestJsonMessaging(MessagingProcessor):
             return {"success": False, "error": str(e)}
 
 
-ProcessorRegistry.register(RestJsonMessaging)

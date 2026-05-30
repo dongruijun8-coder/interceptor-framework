@@ -6,7 +6,6 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
 from ..base import EncryptionProcessor
-from ...processor_registry import ProcessorRegistry
 
 
 class AesCbcEncryption(EncryptionProcessor):
@@ -66,4 +65,3 @@ class AesCbcEncryption(EncryptionProcessor):
         return json.loads(unpad(cipher.decrypt(decoded), AES.block_size))
 
 
-ProcessorRegistry.register(AesCbcEncryption)

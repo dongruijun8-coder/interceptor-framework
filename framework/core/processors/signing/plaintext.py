@@ -1,6 +1,5 @@
 """无签名 — 透传 headers"""
 from ..base import SigningProcessor
-from ...processor_registry import ProcessorRegistry
 
 
 class PlaintextSigning(SigningProcessor):
@@ -14,4 +13,3 @@ class PlaintextSigning(SigningProcessor):
         return headers
 
 
-ProcessorRegistry.register(PlaintextSigning)

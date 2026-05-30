@@ -1,0 +1,37 @@
+{
+  "app_name": "双鱼部落",
+  "subtitle": "Shuangyu Xingqiu",
+  "send_mode": "rest",
+  "send_interval": 3,
+
+  "auth_mode": "password",
+  "phone": "13721057968",
+  "password": "zxc2005",
+  "device_id": "5f467c6c3f03a8a5",
+  "device": "Samsung SM-S9280",
+  "sysVersion": "12",
+  "device_token": "0dc789d7-4061-4133-9d0c-f66c900f7d42",
+  "sm_device_id": "",
+  "client_session": "",
+
+  "data_source": "贡献榜",
+  "period": "今日",
+  "gender": "全部",
+
+  "data_sources": ["贡献榜", "魅力榜", "财富榜"],
+  "periods": ["今日", "本周", "本月"],
+  "genders": ["全部", "男", "女"],
+
+  "templates": [
+    "{nick}你好，来我房间玩嘛~",
+    "{nick}在吗？聊聊呀",
+    "{nick}哈喽~ 来听听歌吧"
+  ],
+
+  "base_url": "https://ui-api-cn.shuangyuxingqiu.com",
+  "app": "sybl",
+  "build": 334,
+  "channel": "oppo",
+  "version": "2.47.1",
+  "platform": "Android"
+}

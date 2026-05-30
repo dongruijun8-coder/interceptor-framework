@@ -1,6 +1,5 @@
 """无消息通道 — 私信不可用"""
 from ..base import MessagingProcessor
-from ...processor_registry import ProcessorRegistry
 
 
 class NoneMessaging(MessagingProcessor):
@@ -10,4 +9,3 @@ class NoneMessaging(MessagingProcessor):
         return {"success": False, "error": "messaging 未配置 — 私信通道不存在"}
 
 
-ProcessorRegistry.register(NoneMessaging)
