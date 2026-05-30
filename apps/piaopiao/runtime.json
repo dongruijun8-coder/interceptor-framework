@@ -1,0 +1,11 @@
+{
+  "credentials": {
+    "token": "jFOm3hZAcMy09UW2QiCs8LHs9AWQwDMg",
+    "uid": "91769319"
+  },
+  "settings": { "send_interval": 3 },
+  "data_sources": { "贡献榜": "contribute" },
+  "periods": { "今日": "day", "本周": "week" },
+  "genders": { "全部": null, "男": 1, "女": 2 },
+  "templates": ["{nick}你好，来我房间玩嘛~", "{nick}在吗？聊聊呀", "{nick}哈喽~ 来听听歌吧"]
+}

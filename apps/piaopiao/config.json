@@ -1,29 +1,32 @@
 {
-  "app_name": "漂漂",
-  "subtitle": "Popo Live",
-  "send_mode": "rest",
-  "send_interval": 3,
-
-  "auth_mode": "manual",
-  "token": "jFOm3hZAcMy09UW2QiCs8LHs9AWQwDMg",
-  "uid": "91769319",
-  "device_id": "5977276abe8b301b",
-  "device": "SM-S9210",
-  "sysVersion": "12",
-
-  "data_source": "贡献榜",
-  "period": "今日",
-  "gender": "全部",
-
-  "data_sources": ["贡献榜"],
-  "periods": ["今日", "本周"],
-  "genders": ["全部", "男", "女"],
-
-  "templates": [
-    "{nick}你好，来我房间玩嘛~",
-    "{nick}在吗？聊聊呀",
-    "{nick}哈喽~ 来听听歌吧"
-  ],
-
-  "base_url": "https://api.pp.weimipopo.com"
+  "meta": { "app_name": "漂漂", "subtitle": "Popo Live", "version": "1.0" },
+  "server": { "base_url": "https://api.pp.weimipopo.com" },
+  "pipeline": {
+    "encryption": "plaintext",
+    "signing": "plaintext",
+    "auth": { "plugin": "manual-token", "params": { "token_field": "token", "uid_field": "uid" } },
+    "messaging": { "plugin": "rest-json", "params": { "precheck_path": "/plpl/im/msg/preCheck", "send_path": "/plpl/im/msg/send" } }
+  },
+  "endpoints": {
+    "all_rooms": {
+      "path": "/plpl/room/main/listByCat",
+      "method": "POST",
+      "body": { "catId": 1, "offset": 0, "limit": 20 },
+      "pagination": { "type": "offset_limit", "size": 20, "stop_on": "empty_list" },
+      "output_mapping": { "id": "unRoomId", "name": "roomName", "type": "voice" }
+    },
+    "ranking": {
+      "path": "/room/rank/list/contribute/rank",
+      "method": "POST",
+      "pagination": { "type": "offset_limit", "size": 20, "stop_on": "empty_list" },
+      "output_mapping": { "uid": "uid", "nick": "nick", "amount": "amount", "gender": "gender" }
+    }
+  },
+  "runtime_config": {
+    "settings": { "send_interval": 3 },
+    "data_sources": { "贡献榜": "contribute" },
+    "periods": { "今日": "day", "本周": "week" },
+    "genders": { "全部": null, "男": 1, "女": 2 },
+    "templates": ["{nick}你好，来我房间玩嘛~", "{nick}在吗？聊聊呀", "{nick}哈喽~ 来听听歌吧"]
+  }
 }

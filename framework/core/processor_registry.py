@@ -38,3 +38,6 @@ class ProcessorRegistry:
                 "params_schema": cls._registry[key].params_schema(),
             }
         return {}
+
+# 首次被 import 时自动注册所有处理器
+from . import processors  # noqa: E402, F401
