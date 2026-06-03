@@ -67,6 +67,9 @@ class BaseClient:
         self._rooms = []
         self._progress = {}
         self._on_update = None
+        self._current_user = {}          # 当前正在发的用户 {uid, nick, text}
+        self._recent_sent: list[dict] = []  # 最近已发 (最多 20 条)
+        self._recent_failed: list[dict] = []  # 最近失败
 
         # Header defaults from config
         self._default_headers = self.config.get("server", {}).get("default_headers", {}).copy()
@@ -371,23 +374,44 @@ class BaseClient:
             template = random.choice(self._templates)
             text = template.replace("{nick}", nick).replace("{room_name}", room.get("name", ""))
 
+            # 记录当前正在发的用户
+            with self._lock:
+                self._current_user = {"uid": uid, "nick": nick, "text": text,
+                                       "room": room.get("name", ""),
+                                       "time": time.strftime("%H:%M:%S")}
+
             try:
                 result = self.send_message(uid, text)
             except Exception as e:
                 result = {"success": False, "error": str(e)}
 
+            entry = {"uid": uid, "nick": nick,
+                     "room": room.get("name", ""),
+                     "time": time.strftime("%H:%M:%S"),
+                     "success": result.get("success", False),
+                     "error": result.get("error", "")}
+
             if result.get("success"):
+                entry["text"] = text
                 self.state.mark_sent(uid, nick, room.get("name", ""))
                 with self._lock:
                     sent = self._progress.get("sent_total", 0) + 1
                     self._progress["sent_total"] = sent
                     self.state.save_progress(sent_total=sent)
+                    self._current_user = {}
+                    self._recent_sent.insert(0, entry)
+                    if len(self._recent_sent) > 20:
+                        self._recent_sent = self._recent_sent[:20]
                 self._notify("sent", {"uid": uid, "nick": nick, "text": text})
             else:
                 with self._lock:
                     failed = self._progress.get("failed_total", 0) + 1
                     self._progress["failed_total"] = failed
                     self.state.save_progress(failed_total=failed)
+                    self._current_user = {}
+                    self._recent_failed.insert(0, entry)
+                    if len(self._recent_failed) > 20:
+                        self._recent_failed = self._recent_failed[:20]
                 self._notify("failed", {
                     "uid": uid, "nick": nick,
                     "error": result.get("error", "unknown"),
@@ -450,6 +474,9 @@ class BaseClient:
         with self._lock:
             progress = dict(self._progress)
             rooms = list(self._rooms)
+            current_user = dict(self._current_user)
+            recent_sent = list(self._recent_sent)
+            recent_failed = list(self._recent_failed)
         total_rooms = len(rooms)
         current_idx = progress.get("current_room_index", 0)
         return {
@@ -460,6 +487,9 @@ class BaseClient:
             "sent": progress.get("sent_total", 0),
             "failed": progress.get("failed_total", 0),
             "current_room": progress.get("current_room_name", ""),
+            "current_user": current_user,
+            "recent_sent": recent_sent,
+            "recent_failed": recent_failed,
             "mode": self.config.get("send_mode", "rest"),
             "interval": self._interval,
             "data_source": self._data_source,
