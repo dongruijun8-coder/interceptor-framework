@@ -54,6 +54,44 @@ def api_app_detail(app_id):
 
 @app.route("/api/app/<app_id>/start", methods=["POST"])
 def api_start(app_id):
+    task = manager.get_task(app_id)
+    if not task:
+        return jsonify({"error": "not found"}), 404
+
+    # If messaging is frida-rpc, set up Frida session before starting
+    if task._messenger.name == "frida-rpc":
+        runtime_path = APPS_DIR / app_id / "runtime.json"
+        if not runtime_path.exists():
+            return jsonify({
+                "success": False,
+                "error": "请先在 Dashboard 中选择 ADB 设备并配置目标应用",
+            }), 400
+        runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+        device_cfg = runtime.get("device", {})
+        serial = device_cfg.get("serial", "")
+        app_package = device_cfg.get("app_package", "")
+        script_name = device_cfg.get("script_name", "hook_send_msg.js")
+
+        if not serial or not app_package:
+            return jsonify({
+                "success": False,
+                "error": "请选择 ADB 设备并填写目标应用包名",
+            }), 400
+
+        script_path = str(APPS_DIR / app_id / script_name)
+
+        from framework.bridge.frida_session import FridaSessionManager
+        try:
+            session_mgr = FridaSessionManager()
+            session = session_mgr.get_or_create(
+                app_id, serial, app_package, script_path
+            )
+            task.set_frida_session(session)
+        except RuntimeError as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+        except Exception as e:
+            return jsonify({"success": False, "error": f"Frida 初始化失败: {e}"}), 500
+
     ok = manager.start(app_id)
     return jsonify({"success": ok})
 
@@ -66,6 +104,14 @@ def api_pause(app_id):
 
 @app.route("/api/app/<app_id>/stop", methods=["POST"])
 def api_stop(app_id):
+    task = manager.get_task(app_id)
+    if not task:
+        return jsonify({"error": "not found"}), 404
+
+    task.clear_frida_session()
+    from framework.bridge.frida_session import FridaSessionManager
+    FridaSessionManager().remove(app_id)
+
     ok = manager.stop(app_id)
     return jsonify({"success": ok})
 
@@ -307,6 +353,43 @@ def _validate_config(data: dict) -> tuple:
             warnings.append(f"base_url 不可达: {base_url}")
 
     return errors, warnings
+
+
+# ==================== Device API ====================
+
+@app.route("/api/devices")
+def api_devices():
+    """List all connected ADB devices"""
+    from framework.bridge.adb_device import AdbDevice
+    devices = AdbDevice.list_devices()
+    return jsonify([d.to_dict() for d in devices])
+
+
+@app.route("/api/app/<app_id>/device", methods=["GET"])
+def api_app_device_get(app_id):
+    """Get app device selection from runtime.json"""
+    runtime_path = APPS_DIR / app_id / "runtime.json"
+    if runtime_path.exists():
+        runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+        return jsonify(runtime.get("device", {}))
+    return jsonify({})
+
+
+@app.route("/api/app/<app_id>/device", methods=["POST"])
+def api_app_device_set(app_id):
+    """Save app device selection to runtime.json"""
+    data = request.get_json() or {}
+    runtime_path = APPS_DIR / app_id / "runtime.json"
+    runtime = {}
+    if runtime_path.exists():
+        runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+    runtime["device"] = {
+        "serial": data.get("serial", ""),
+        "app_package": data.get("app_package", ""),
+        "script_name": data.get("script_name", "hook_send_msg.js"),
+    }
+    _atomic_write_json(runtime_path, runtime)
+    return jsonify({"success": True})
 
 
 def run_dashboard(host: str = "127.0.0.1", port: int = 3112, debug: bool = False):
