@@ -137,15 +137,32 @@ class BaseClient:
         return [self._map_fields(r, mapping) for r in all_rooms]
 
     def fetch_room_ranking(self, room: dict, period: str) -> list:
-        ep = self.config["endpoints"]["ranking"]
+        ep = dict(self.config["endpoints"]["ranking"])
         period_key = self._periods.get(period, "day")
         ds_key = self._data_sources.get(self._data_source, "")
+
+        # Support per-period list selection via output_mapping.lists config
+        op = ep.get("output_mapping", {})
+        lists_cfg = op.get("lists", {})
+        if lists_cfg:
+            # Find the list key matching this period (e.g. rich_day, rich_week)
+            matched = None
+            for list_key, list_cfg in lists_cfg.items():
+                if list_key.endswith(f"_{period_key}"):
+                    matched = list_cfg
+                    break
+            if matched:
+                ep["response_path"] = matched["response_list"]
+                if "amount_field" in matched:
+                    op = dict(op)
+                    op["amount"] = matched["amount_field"]
 
         body = self._fill_template(ep.get("body", {}),
                                    room=room, period_key=period_key, data_source_key=ds_key)
         items = self._fetch_paginated(ep, body)
-        mapping = ep.get("output_mapping", {})
-        return [self._map_fields(u, mapping) for u in items]
+        op.pop("lists", None)
+        op.pop("note", None)
+        return [self._map_fields(u, op) for u in items]
 
     def send_message(self, uid: str, text: str) -> dict:
         return self._messenger.send(self, uid, text)

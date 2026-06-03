@@ -66,49 +66,51 @@
 
   "endpoints": {
     "all_rooms": {
-      "path": "/api/audioroom/v1/audioroom/list",
+      "path": "/api/audioroom/v1/audioroom/virtual/lover/recommend",
       "method": "GET",
+      "body": {},
       "response_path": "data.rooms",
-      "body": {
-        "scene": "2"
-      },
       "pagination": {
-        "type": "scene_param",
-        "note": "No standard pagination. scene=2 returns recommended rooms, scene=3 returns different set."
+        "type": "none"
       },
       "output_mapping": {
         "id": "id",
         "name": "title",
+        "public_id": "public_id",
         "cover": "cover",
         "member_cnt": "member_cnt",
         "inuse_mic_cnt": "inuse_mic_cnt",
         "broadcaster_mic_cnt": "broadcaster_mic_cnt",
-        "room_mode": "room_mode",
+        "owner": "owner",
+        "recommend_user_list": "recommend_user_list",
         "solo_tag": "solo_tag",
-        "owner": "owner"
+        "room_mode": "room_mode"
       }
     },
 
     "ranking": {
       "path": "/api/audioroom/v1/room/billboard",
       "method": "GET",
-      "response_path": "data.heart_day_billboard_list",
       "body": {
         "room_id": "{{room.id}}"
       },
       "pagination": {
         "type": "none",
-        "note": "Returns full list per room. 4 lists: heart_day, heart_week, rich_day, rich_week."
+        "note": "Returns full list per room. No pagination params needed."
       },
       "output_mapping": {
         "uid": "user_info.userid",
         "nick": "user_info.nickname",
-        "amount": "heart_value",
         "gender": "user_info.gender",
         "avatar_url": "user_info.avatar_url",
         "level": "user_info.level",
         "public_id": "user_info.public_id",
-        "age": "user_info.age"
+        "age": "user_info.age",
+        "lists": {
+          "rich_day": { "response_list": "data.rich_day_billboard_list", "amount_field": "rich_value", "label": "富豪日榜" },
+          "rich_week": { "response_list": "data.rich_week_billboard_list", "amount_field": "rich_value", "label": "富豪周榜" }
+        },
+        "note": "富豪榜 only. rich = gift senders. Response also contains heart lists (魅力榜) which are ignored."
       }
     },
 
