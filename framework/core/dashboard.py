@@ -111,8 +111,56 @@ def api_stop(app_id):
 
 @app.route("/api/app/<app_id>/rescan", methods=["POST"])
 def api_rescan(app_id):
-    ok = manager.rescan_rooms(app_id)
-    return jsonify({"success": ok})
+    ok, err = manager.rescan_rooms(app_id)
+    task = manager.get_task(app_id)
+    rooms = task._rooms if task else []
+    return jsonify({
+        "success": ok,
+        "error": err,
+        "total_rooms": len(rooms),
+        "rooms": [{"id": r.get("id",""), "name": r.get("name","")} for r in rooms[:5]]
+    })
+
+
+@app.route("/api/app/<app_id>/settings", methods=["POST"])
+def api_app_settings(app_id):
+    """Update runtime settings: interval, data_source, period, gender, templates."""
+    task = manager.get_task(app_id)
+    if not task:
+        return jsonify({"error": "not found"}), 404
+
+    data = request.get_json() or {}
+    runtime_path = APPS_DIR / app_id / "runtime.json"
+    runtime = {}
+    if runtime_path.exists():
+        runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+
+    settings = runtime.setdefault("settings", {})
+    if "send_interval" in data:
+        settings["send_interval"] = data["send_interval"]
+        task._interval = data["send_interval"]
+    if "data_sources" in data:
+        runtime["data_sources"] = data["data_sources"]
+    if "periods" in data:
+        runtime["periods"] = data["periods"]
+    if "genders" in data:
+        runtime["genders"] = data["genders"]
+    if "templates" in data:
+        runtime["templates"] = data["templates"]
+        task._templates = data["templates"]
+    # Current selection
+    if "data_source" in data:
+        runtime["data_source"] = data["data_source"]
+        task._data_source = data["data_source"]
+    if "period" in data:
+        runtime["period"] = data["period"]
+        task._period = data["period"]
+    if "gender" in data:
+        runtime["gender"] = data["gender"]
+        task._gender = data["gender"]
+
+    _atomic_write_json(runtime_path, runtime)
+    return jsonify({"success": True})
 
 
 # ═══ Account API ═══

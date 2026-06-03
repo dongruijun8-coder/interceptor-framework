@@ -413,7 +413,10 @@ function mapApp(api) {
     currentRoom: api.current_room || null,
     dataSource: api.data_source,
     period: api.period,
-    gender: api.gender
+    gender: api.gender,
+    availableDataSources: api.available_data_sources || {},
+    availablePeriods: api.available_periods || {},
+    availableGenders: api.available_genders || {}
   };
 }
 
@@ -598,12 +601,19 @@ function showDetail(id) {
 }
 function showConfig(id) {
   var a = apps.find(function(x){return x.id===id}); if (!a) return;
+  // Dynamic select builder
+  function sel(label, current, available) {
+    var keys = Object.keys(available || {});
+    if (!keys.length) keys = [current || label];
+    var opts = keys.map(function(k){ return '<option' + (k===current?' selected':'') + '>' + k + '</option>'; }).join('');
+    return '<label>'+label+'</label><select>'+opts+'</select>';
+  }
   document.getElementById('configContent').innerHTML =
     '<h3>'+a.name+' 设置</h3>'
     +'<label>发信间隔（秒）</label><input value="'+a.interval+'" type="number" min="1" max="60">'
-    +'<label>数据源</label><select><option>'+a.dataSource+'</option></select>'
-    +'<label>时段</label><select><option>'+a.period+'</option></select>'
-    +'<label>性别筛选</label><select><option>'+a.gender+'</option></select>'
+    +sel('数据源', a.dataSource, a.availableDataSources)
+    +sel('时段', a.period, a.availablePeriods)
+    +sel('性别筛选', a.gender, a.availableGenders)
     +'<label>话术模板（一行一条，{nick}=昵称）</label>'
     +'<textarea style="height:80px">{nick}你好，来我房间玩嘛~\n{nick}在吗？聊聊呀\n{nick}哈喽~</textarea>'
     +'<div class="btn-row"><div class="btn btn-ghost" onclick="closeConfigModal()">关闭</div><div class="btn btn-primary" onclick="closeConfigModal()">保存</div></div>';

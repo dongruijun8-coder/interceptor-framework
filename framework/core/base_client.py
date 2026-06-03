@@ -397,10 +397,13 @@ class BaseClient:
         self._running = False
 
     def run_room(self, room: dict, idx: int) -> None:
+        room_name = room.get("name", "")
         with self._lock:
+            self._progress["current_room_index"] = idx
+            self._progress["current_room_name"] = room_name
             self.state.save_progress(
                 current_room_index=idx,
-                current_room_name=room.get("name", ""),
+                current_room_name=room_name,
             )
 
         try:
@@ -480,6 +483,10 @@ class BaseClient:
         return self._running
 
     def refresh_rooms(self) -> list:
+        if not self._authenticated:
+            if not self.authenticate():
+                raise RuntimeError("认证失败")
+            self._authenticated = True
         self._rooms = self.fetch_all_rooms()
         self.state.save_rooms(self._rooms)
         return self._rooms
@@ -550,6 +557,9 @@ class BaseClient:
             "period": self._period,
             "gender": self._gender,
             "messaging_type": self._messenger.name,
+            "available_data_sources": self._data_sources,
+            "available_periods": self._periods,
+            "available_genders": self._genders,
         }
 
     def _notify(self, event: str, payload) -> None:

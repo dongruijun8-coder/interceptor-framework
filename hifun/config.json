@@ -180,6 +180,14 @@
     }
   },
 
+  "runtime_config": {
+    "settings": { "send_interval": 5 },
+    "data_sources": { "富豪榜": "rich" },
+    "periods": { "今日": "day", "本周": "week" },
+    "genders": { "全部": null, "男": 1, "女": 2 },
+    "templates": ["{nick} 你好~", "{nick} 在吗？"]
+  },
+
   "signing": {
     "algorithm": "SHA1(sorted_params + &secret_key=SECRET_KEY)",
     "description": "Sort all params alphabetically by key → K=V pairs joined with & → append &secret_key=SECRET_KEY → SHA-1 → uppercase hex",

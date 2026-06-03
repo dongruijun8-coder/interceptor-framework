@@ -71,16 +71,16 @@ class TaskManager:
         task.reset_progress()
         return True
 
-    def rescan_rooms(self, app_id: str) -> bool:
+    def rescan_rooms(self, app_id: str):
         task = self._tasks.get(app_id)
         if not task:
-            return False
+            return False, "not found"
         try:
             task.refresh_rooms()
-            return True
+            return True, ""
         except Exception as e:
             print(f"[TaskManager] 重新扫描 {app_id} 失败: {e}")
-            return False
+            return False, str(e)
 
     # ═══ 查询 ═══
 
