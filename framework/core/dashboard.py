@@ -23,7 +23,7 @@ DETAIL_HTML = SPEC_DIR / "design-mockup.html"
 
 APPS_DIR = Path(__file__).resolve().parent.parent.parent / "apps"
 
-ALLOWED_CONFIG_SCHEMAS = ["2.0"]
+ALLOWED_CONFIG_SCHEMAS = ["1.0", "2.0"]
 
 
 def _atomic_write_json(path: Path, data) -> None:
@@ -243,10 +243,35 @@ def apps_manage():
 
 @app.route("/api/apps/upload", methods=["POST"])
 def api_apps_upload():
-    """上传配置 JSON → 校验 → 保存"""
-    data = request.get_json()
-    if not data:
-        return jsonify({"success": False, "error": "请求体为空"}), 400
+    """上传配置 — 支持 JSON body 或 zip 包 (config.json + hook_send_msg.js)"""
+    data = None
+    hook_js = None
+
+    # Detect: multipart zip upload vs plain JSON body
+    if request.content_type and "multipart" in request.content_type:
+        file = request.files.get("file")
+        if not file or not file.filename.endswith(".zip"):
+            return jsonify({"success": False, "error": "请上传 .zip 文件"}), 400
+
+        import zipfile, io
+        try:
+            with zipfile.ZipFile(io.BytesIO(file.read()), "r") as zf:
+                # Extract config.json (required)
+                if "config.json" not in zf.namelist():
+                    return jsonify({"success": False, "error": "zip 包缺少 config.json"}), 400
+                data = json.loads(zf.read("config.json").decode("utf-8"))
+
+                # Extract hook JS (optional)
+                for name in zf.namelist():
+                    if name.endswith(".js") and name != "config.json":
+                        hook_js = zf.read(name).decode("utf-8")
+                        break
+        except (zipfile.BadZipFile, json.JSONDecodeError) as e:
+            return jsonify({"success": False, "error": f"文件解析失败: {e}"}), 400
+    else:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "请求体为空 — 请上传 JSON 或 .zip 文件"}), 400
 
     errors, warnings = _validate_config(data)
 
@@ -260,6 +285,11 @@ def api_apps_upload():
     # Save config.json
     config_path = app_dir / "config.json"
     _atomic_write_json(config_path, data)
+
+    # Save hook JS if provided
+    if hook_js:
+        hook_path = app_dir / "hook_send_msg.js"
+        hook_path.write_text(hook_js, encoding="utf-8")
 
     # Create runtime.json template
     runtime_path = app_dir / "runtime.json"
@@ -277,7 +307,12 @@ def api_apps_upload():
     # Dynamic register
     manager.register(app_name, str(config_path))
 
-    return jsonify({"success": True, "app_id": app_name, "warnings": warnings})
+    return jsonify({
+        "success": True,
+        "app_id": app_name,
+        "warnings": warnings,
+        "has_hook": hook_js is not None,
+    })
 
 
 @app.route("/api/apps/<app_id>/test", methods=["POST"])
@@ -323,12 +358,9 @@ def _validate_config(data: dict) -> tuple:
     errors = []
     warnings = []
 
-    try:
-        schema_ver = data.get("meta", {}).get("config_schema", "1.0")
-        if schema_ver not in ALLOWED_CONFIG_SCHEMAS:
-            errors.append(f"不支持的 config_schema 版本: {schema_ver}")
-    except Exception:
-        errors.append("meta.config_schema 字段缺失或无效")
+    schema_ver = data.get("meta", {}).get("config_schema") or "1.0"
+    if schema_ver not in ALLOWED_CONFIG_SCHEMAS:
+        errors.append(f"不支持的 config_schema 版本: {schema_ver} (支持: {ALLOWED_CONFIG_SCHEMAS})")
 
     if not data.get("meta", {}).get("app_name"):
         errors.append("缺少 meta.app_name")

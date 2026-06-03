@@ -86,8 +86,8 @@ a:hover { text-decoration: underline; }
         <h3 style="margin-bottom:12px">上传配置</h3>
         <div class="upload-zone" id="uploadZone">
           <div class="icon">+</div>
-          <p>拖拽 JSON 文件到此处<br>或点击选择文件</p>
-          <input type="file" id="fileInput" accept=".json" style="display:none">
+          <p>拖拽 .json 或 .zip 文件到此处<br>或点击选择文件</p>
+          <input type="file" id="fileInput" accept=".json,.zip" style="display:none">
         </div>
         <div id="validationResult" class="hidden" style="margin-top:12px"></div>
         <div style="margin-top:12px;display:flex;gap:8px">
@@ -129,35 +129,61 @@ zone.addEventListener('dragleave', function(){ zone.classList.remove('drag'); })
 zone.addEventListener('drop', function(e){ e.preventDefault(); zone.classList.remove('drag'); handleFile(e.dataTransfer.files[0]); });
 fileInp.addEventListener('change', function(){ if(fileInp.files[0]) handleFile(fileInp.files[0]); });
 
+var uploadedFile = null;  // File object for zip upload
+
 function handleFile(file) {
+  uploadedFile = file;
+  var ext = file.name.split('.').pop().toLowerCase();
+
+  if (ext === 'zip') {
+    // Zip: send as multipart, backend extracts config.json + hook JS
+    var formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/api/apps/upload', { method: 'POST', body: formData })
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if (data.errors && data.errors.length) {
+          showValidation(data.errors, data.warnings || []);
+        } else {
+          showValidation([], data.warnings || []);
+          document.getElementById('activateBtn').classList.remove('hidden');
+          document.getElementById('testBtn').classList.remove('hidden');
+          uploadedName = data.app_id || '';
+          if (data.has_hook) {
+            var el = document.getElementById('validationResult');
+            el.innerHTML += '<div class="log ok">+ hook_send_msg.js</div>';
+          }
+        }
+      });
+    return;
+  }
+
+  // JSON: read as text, send as JSON body
   var reader = new FileReader();
   reader.onload = function(e) {
     try {
       uploadedConfig = JSON.parse(e.target.result);
       uploadedName = uploadedConfig.meta.app_name;
-      validateAndShow(uploadedName);
+      fetch('/api/apps/upload', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(uploadedConfig)
+      }).then(function(r){ return r.json(); }).then(function(data){
+        if (data.errors && data.errors.length) {
+          showValidation(data.errors, data.warnings || []);
+        } else {
+          showValidation([], data.warnings || []);
+          document.getElementById('activateBtn').classList.remove('hidden');
+          document.getElementById('testBtn').classList.remove('hidden');
+          uploadedName = data.app_id || name;
+        }
+      });
     } catch(err) {
       uploadedConfig = null;
       showValidation([], ['JSON 解析失败: ' + err.message]);
     }
   };
   reader.readAsText(file);
-}
-
-function validateAndShow(name) {
-  fetch('/api/apps/upload', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(uploadedConfig)
-  }).then(r=>r.json()).then(data => {
-    if (data.errors && data.errors.length) {
-      showValidation(data.errors, data.warnings || []);
-    } else {
-      showValidation([], data.warnings || []);
-      document.getElementById('activateBtn').classList.remove('hidden');
-      document.getElementById('testBtn').classList.remove('hidden');
-      uploadedName = data.app_id || name;
-    }
-  });
 }
 
 function showValidation(errors, warnings) {
@@ -179,11 +205,23 @@ function showValidation(errors, warnings) {
 }
 
 function activateApp() {
+  if (uploadedFile && uploadedFile.name.endsWith('.zip')) {
+    // Re-upload zip
+    var formData = new FormData();
+    formData.append('file', uploadedFile);
+    fetch('/api/apps/upload', { method: 'POST', body: formData })
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if (data.success) location.reload();
+        else alert('激活失败: ' + (data.errors || []).join(', '));
+      });
+    return;
+  }
   if (!uploadedConfig) return;
   fetch('/api/apps/upload', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(uploadedConfig)
-  }).then(r=>r.json()).then(data => {
+  }).then(function(r){ return r.json(); }).then(function(data){
     if (data.success) location.reload();
     else alert('激活失败: ' + (data.errors || []).join(', '));
   });
