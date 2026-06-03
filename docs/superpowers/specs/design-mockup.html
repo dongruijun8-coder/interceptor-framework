@@ -142,9 +142,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
   </button>
   <div class="title" id="topTitle"><span class="dot dot-run"></span><span id="appLabel">加载中...</span></div>
   <div class="right">
+    <div class="btn btn-success btn-xs hidden" id="btnStart" onclick="startTask()">开始</div>
     <div class="btn btn-warning btn-xs hidden" id="btnPause" onclick="togglePause()">暂停</div>
     <div class="btn btn-success btn-xs hidden" id="btnResume" onclick="toggleResume()">继续</div>
-    <div class="btn btn-danger btn-xs" onclick="stopTask()">停止</div>
+    <div class="btn btn-danger btn-xs hidden" id="btnStop" onclick="stopTask()">停止</div>
     <div class="btn btn-ghost btn-xs" onclick="openSettings()">设置</div>
   </div>
 </header>
@@ -251,8 +252,10 @@ function updateTopBar() {
   var dotEl = document.querySelector('.topbar .title .dot');
   dotEl.className = 'dot ' + (s === 'running' ? 'dot-run' : s === 'paused' ? 'dot-pause' : '');
   document.getElementById('appLabel').textContent = appData.app_name;
+  document.getElementById('btnStart').classList.toggle('hidden', s !== 'idle');
   document.getElementById('btnPause').classList.toggle('hidden', s !== 'running');
   document.getElementById('btnResume').classList.toggle('hidden', s !== 'paused');
+  document.getElementById('btnStop').classList.toggle('hidden', s === 'idle');
 }
 
 function updateProgress() {
@@ -310,6 +313,7 @@ function updateTemplates() {
 // ═══ Actions ═══
 function goBack() { window.location.href = '/'; }
 function togglePause() { fetch('/api/app/' + encodeURIComponent(APP_ID) + '/pause', {method:'POST'}).then(function(){ fetchApp(); }); }
+function startTask() { fetch('/api/app/' + encodeURIComponent(APP_ID) + '/start', {method:'POST'}).then(function(r){ return r.json(); }).then(function(d){ if(d.error) alert(d.error); fetchApp(); }); }
 function toggleResume() { fetch('/api/app/' + encodeURIComponent(APP_ID) + '/start', {method:'POST'}).then(function(){ fetchApp(); }); }
 function stopTask() { if (confirm('确认停止？进度将重置。')) { fetch('/api/app/' + encodeURIComponent(APP_ID) + '/stop', {method:'POST'}).then(function(){ fetchApp(); }); } }
 function openSettings() { document.getElementById('settingsModal').classList.remove('hidden'); }

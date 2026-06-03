@@ -1,0 +1,28 @@
+{
+  "credentials": {
+    "token": "8e2f417ab55d4da793ac853612f04f77",
+    "uid": 1177203
+  },
+  "settings": {
+    "send_interval": 5
+  },
+  "data_sources": {
+    "魅力榜": "heart",
+    "财富榜": "rich"
+  },
+  "periods": {
+    "今日": "day",
+    "本周": "week"
+  },
+  "genders": {
+    "全部": null,
+    "男": 1,
+    "女": 2
+  },
+  "templates": ["{nick} 你好~", "{nick} 在吗？", "{nick} 哈喽~"],
+  "device": {
+    "serial": "",
+    "app_package": "chat.hifun.android",
+    "script_name": "hook_send_msg.js"
+  }
+}

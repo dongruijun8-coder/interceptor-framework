@@ -33,8 +33,8 @@ class SigningProcessor(BaseProcessor, ABC):
     category = "signing"
 
     @abstractmethod
-    def sign(self, url: str, headers: dict) -> dict:
-        """返回添加签名头后的 headers"""
+    def sign(self, url: str, headers: dict, params: dict = None) -> tuple:
+        """返回 (headers, query_params) — query_params 加到请求 URL query string"""
 
 
 class AuthProcessor(BaseProcessor, ABC):

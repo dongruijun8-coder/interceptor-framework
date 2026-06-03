@@ -90,7 +90,10 @@ class FridaSession:
             self._connected = True
 
     def send_message(self, uid: str, text: str) -> dict:
-        """Call rpc.exports.sendMessage(uid, text) in the injected script.
+        """Call rpc.exports.sendMessage/sendText(uid, text) in the injected script.
+
+        Tries multiple JS export names in order:
+        sendMessage → send_message → sendText → send_text
 
         Returns:
             {"success": bool, "error": str}
@@ -100,18 +103,40 @@ class FridaSession:
         if not self._connected or not self._rpc:
             raise FridaDisconnectedError("Frida 会话已断开")
 
-        try:
-            result = self._rpc.send_message(uid, text)
-        except frida.core.RPCException as e:
-            return {"success": False, "error": f"RPC 调用失败: {e}"}
-        except frida.InvalidOperationError:
-            self._connected = False
-            raise FridaDisconnectedError("Frida 会话在执行 RPC 时断开")
+        # Try each method name until one works
+        method_names = ["sendMessage", "send_message", "sendText", "send_text"]
+        result = None
+        last_error = None
+
+        for name in method_names:
+            if not hasattr(self._rpc, name):
+                continue
+            try:
+                result = getattr(self._rpc, name)(uid, text)
+                break
+            except frida.core.RPCException as e:
+                last_error = e
+                continue
+            except frida.InvalidOperationError:
+                self._connected = False
+                raise FridaDisconnectedError("Frida 会话在执行 RPC 时断开")
+        else:
+            if last_error:
+                return {"success": False, "error": f"RPC 调用失败: {last_error}"}
+            return {"success": False, "error": "RPC exports 未找到 sendMessage/sendText 方法"}
 
         # Interpret JS return value
         if result is True or result == "ok":
             return {"success": True, "error": ""}
         elif isinstance(result, str):
+            # Try to parse JSON string
+            try:
+                import json
+                parsed = json.loads(result)
+                if isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
             return {"success": False, "error": result}
         elif isinstance(result, dict):
             return result

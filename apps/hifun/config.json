@@ -1,0 +1,277 @@
+{
+  "meta": {
+    "app_name": "hifun",
+    "package": "chat.hifun.android",
+    "version": "1.44.0",
+    "version_code": 116,
+    "platform": "android",
+    "config_schema": "2.0",
+    "generated_at": "2026-06-03",
+    "endpoint_count": 64
+  },
+
+  "server": {
+    "base_url": "https://api.hifunclub.com",
+    "cdn_url": "https://cdn.hifunclub.com",
+    "h5_url": "https://h5.hifunclub.com",
+    "default_headers": {
+      "User-Agent": "(hifun) 116 (1.44.0) android Samsung SM-S9210 android 12 (1080x2340)",
+      "client-platform": "android",
+      "app-version": "1.44.0",
+      "device-id": "4e687b2e4be0cf47",
+      "fk-channel": "commonPay",
+      "Content-Type": "application/json; charset=utf-8"
+    }
+  },
+
+  "pipeline": {
+    "encryption": "plaintext",
+    "signing": {
+      "plugin": "sha1-sorted-kv",
+      "params": {
+        "secret_key": "83cdd18ed05da8268e0e121a1f9a4007",
+        "secret_key_placement": "append",
+        "secret_key_param": "secret_key",
+        "hash": "sha1",
+        "output_format": "uppercase_hex",
+        "param_sort": "alphabetical_by_key",
+        "excluded_params": ["Fk-Channel", "sign"],
+        "nonce_param": "nonce",
+        "nonce_length": 30,
+        "nonce_charset": "hex_uppercase",
+        "timestamp_param": "timestamp",
+        "access_key_param": "access_key",
+        "access_key_value": "0cf4a77a4428f606a3897adb533abc4a",
+        "sign_param": "sign"
+      }
+    },
+    "auth": {
+      "plugin": "header-token",
+      "params": {
+        "header_name": "access-token",
+        "token_source": "shared_prefs",
+        "token_sp_key": "refresh_token",
+        "token_json_path": "access_token",
+        "refresh_path": "/api/ucuser/v1/refresh",
+        "refresh_token_sp_key": "refresh_token",
+        "refresh_token_json_path": "refresh_token",
+        "note": "Token extracted from user_info SharedPreferences → refresh_token JSON → access_token field. Also available via Frida: hooks/read_sp.js"
+      }
+    },
+    "messaging": {
+      "plugin": "frida-rpc",
+      "params": {}
+    }
+  },
+
+  "endpoints": {
+    "all_rooms": {
+      "path": "/api/audioroom/v1/audioroom/list",
+      "method": "GET",
+      "response_path": "data.rooms",
+      "body": {
+        "scene": "2"
+      },
+      "pagination": {
+        "type": "scene_param",
+        "note": "No standard pagination. scene=2 returns recommended rooms, scene=3 returns different set."
+      },
+      "output_mapping": {
+        "id": "id",
+        "name": "title",
+        "cover": "cover",
+        "member_cnt": "member_cnt",
+        "inuse_mic_cnt": "inuse_mic_cnt",
+        "broadcaster_mic_cnt": "broadcaster_mic_cnt",
+        "room_mode": "room_mode",
+        "solo_tag": "solo_tag",
+        "owner": "owner"
+      }
+    },
+
+    "ranking": {
+      "path": "/api/audioroom/v1/room/billboard",
+      "method": "GET",
+      "response_path": "data.heart_day_billboard_list",
+      "body": {
+        "room_id": "{{room.id}}"
+      },
+      "pagination": {
+        "type": "none",
+        "note": "Returns full list per room. 4 lists: heart_day, heart_week, rich_day, rich_week."
+      },
+      "output_mapping": {
+        "uid": "user_info.userid",
+        "nick": "user_info.nickname",
+        "amount": "heart_value",
+        "gender": "user_info.gender",
+        "avatar_url": "user_info.avatar_url",
+        "level": "user_info.level",
+        "public_id": "user_info.public_id",
+        "age": "user_info.age"
+      }
+    },
+
+    "ranking_v2": {
+      "path": "/api/audioroom/v2/room/billboard",
+      "method": "GET",
+      "body": {
+        "room_id": "{{room.id}}",
+        "scene": "1"
+      },
+      "pagination": {
+        "type": "none"
+      },
+      "output_mapping": {
+        "id": "id",
+        "name": "title",
+        "amount": "score",
+        "avatar_url": "avatar_url",
+        "public_id": "public_id",
+        "score_desc": "score_desc",
+        "note": "Room-level ranking (top rooms by score). Not user-level."
+      }
+    },
+
+    "room_detail": {
+      "path": "/api/audioroom/v1/audioroom/detail",
+      "method": "GET",
+      "body": {
+        "room_id": "{{room.id}}"
+      },
+      "output_mapping": {
+        "name": "room_name",
+        "owner_uid": "owner_uid",
+        "owner_name": "owner_name",
+        "online_count": "online_count",
+        "total_count": "total_count",
+        "room_type": "room_type",
+        "room_tags": "room_tags"
+      }
+    },
+
+    "room_recently_visited": {
+      "path": "/api/audioroom/v1/audioroom/recently_visited",
+      "method": "GET",
+      "body": {},
+      "output_mapping": {
+        "note": "Returns recently visited rooms for current user"
+      }
+    },
+
+    "room_friend_rooms": {
+      "path": "/api/audioroom/v1/audioroom/friend_rooms",
+      "method": "GET",
+      "body": {},
+      "output_mapping": {
+        "note": "Returns friend-related rooms"
+      }
+    },
+
+    "game_rooms": {
+      "path": "/api/audioroom/v1/game/rooms",
+      "method": "GET",
+      "body": {},
+      "output_mapping": {
+        "note": "Returns game rooms"
+      }
+    }
+  },
+
+  "signing": {
+    "algorithm": "SHA1(sorted_params + &secret_key=SECRET_KEY)",
+    "description": "Sort all params alphabetically by key → K=V pairs joined with & → append &secret_key=SECRET_KEY → SHA-1 → uppercase hex",
+    "access_key": "0cf4a77a4428f606a3897adb533abc4a",
+    "secret_key": "83cdd18ed05da8268e0e121a1f9a4007",
+    "fk_channel": "commonPay",
+    "hash": "sha1",
+    "output_format": "uppercase_hex",
+    "nonce_length": 30,
+    "nonce_charset": "hex_uppercase",
+    "param_sort": "alphabetical_by_key",
+    "secret_key_placement": "append",
+    "excluded_params": ["Fk-Channel", "sign"],
+    "sign_class": "com.hifun.sdk.HiFunHttpHelper",
+    "sign_method": "sha1 → generateParamsSign",
+    "integration": "OkHttp HeaderInterceptor",
+    "implementation": "sign.py"
+  },
+
+  "auth": {
+    "type": "access_token",
+    "token_header": "access-token",
+    "device_id": "4e687b2e4be0cf47",
+    "device_id_header": "device-id",
+    "token_source": {
+      "login": "/api/ucuser/v1/login",
+      "refresh": "/api/ucuser/v1/refresh",
+      "extracted_from": "shared_prefs/user_info.xml → refresh_token JSON → access_token"
+    },
+    "current_tokens": {
+      "access_token": "8e2f417ab55d4da793ac853612f04f77",
+      "refresh_token": "3ec67082b1cc494f8c60884bc5ec7342",
+      "user_id": 1177203,
+      "public_id": 1357341,
+      "note": "Token valid for 30 days. Extract fresh via Frida hooks/read_sp.js if expired."
+    },
+    "token_extraction": {
+      "method": "frida",
+      "script": "hooks/read_sp.js",
+      "note": "access_token NOT stored directly — nested inside refresh_token JSON in user_info SharedPreferences. Use read_sp.js to extract."
+    }
+  },
+
+  "messaging": {
+    "im": {
+      "type": "TencentIM",
+      "sdk_app_id": 1721001002,
+      "sdk": "libImSDK.so",
+      "note": "Real-time messaging via TencentIM TCP. Use Frida RPC bridge for send/receive.",
+      "rpc_script": "hooks/im_rpc.js",
+      "python_client": "im_send.py"
+    },
+    "rtc": {
+      "type": "ZegoExpressEngine",
+      "sdk": "libZegoExpressEngine.so"
+    },
+    "live_stream": {
+      "type": "TencentLiteAV",
+      "sdk": "libliteavsdk.so"
+    }
+  },
+
+  "security": {
+    "packer": "360加固 (libjiagu)",
+    "ssl_pinning": false,
+    "certificate_sha1": "24dbcae687f4eb5d8d66832c134b31a39c03ca7e",
+    "anti_debug": "360加固 standard anti-tampering — compatible with frida-server 16.5.9"
+  },
+
+  "sdk_detected": {
+    "TencentIM": "libImSDK.so — instant messaging",
+    "ZegoExpressEngine": "libZegoExpressEngine.so — audio/video calls",
+    "TencentLiteAV": "libliteavsdk.so — live streaming",
+    "SudMG": "libsud.so — mini-game engine",
+    "Bugly": "libBugly_Native.so — crash reporting",
+    "Adjust": "libsigner.so — attribution (not API signing)",
+    "MicrosoftCognitiveServices": "speech recognition"
+  },
+
+  "frida": {
+    "working_version": "16.5.9",
+    "architecture": "x86_64",
+    "android_version": 12,
+    "hooks": {
+      "im_rpc": "hooks/im_rpc.js — TencentIM send/receive",
+      "read_sp": "hooks/read_sp.js — extract access_token",
+      "sniff_urls": "hooks/sniff_urls.js — capture API calls"
+    }
+  },
+
+  "tools": {
+    "sign": "output/sign.py",
+    "send_message": "im_send.py",
+    "list_contacts": "im_send.py --list-contacts",
+    "get_rooms": "get_rooms.py"
+  }
+}

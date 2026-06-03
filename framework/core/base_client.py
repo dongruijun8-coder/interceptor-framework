@@ -128,9 +128,9 @@ class BaseClient:
                 else:
                     base_url = self._base_url
                     path = step["path"]
-                    resp = self._post(f"{base_url}{path}", body)
+                    resp = self._request(step, body)
                     if self.check_response(resp):
-                        items = resp.get("data", {}).get("list", resp.get("data", []))
+                        items = self._extract_list(resp, step)
                         step_results[name] = {"list": items, "raw": resp.get("data", {})}
 
         mapping = ep.get("output_mapping", {})
@@ -162,7 +162,13 @@ class BaseClient:
         headers["Content-Type"] = "text/plain; charset=UTF-8"
         headers["__auth_token__"] = self._auth_token
 
-        headers = self._signer.sign(url, headers)
+        headers, extra_params = self._signer.sign(url, headers, body)
+
+        # Add signing params to URL query string
+        if extra_params:
+            import urllib.parse
+            sep = "&" if "?" in url else "?"
+            url = url + sep + urllib.parse.urlencode(extra_params)
 
         r = self.session.post(url, data=encrypted, headers=headers, timeout=30)
         r.raise_for_status()
@@ -176,10 +182,13 @@ class BaseClient:
                 raise RuntimeError(f"decryption failed: {r.text[:200]}")
 
     def _get(self, url: str, params: dict = None) -> dict:
-        params = params or {}
+        params = dict(params or {})
         headers = dict(self._default_headers)
         headers["__auth_token__"] = self._auth_token
-        headers = self._signer.sign(url, headers)
+
+        headers, extra_params = self._signer.sign(url, headers, params)
+        params.update(extra_params)
+
         r = self.session.get(url, params=params, headers=headers, timeout=30)
         r.raise_for_status()
         try:
@@ -189,21 +198,44 @@ class BaseClient:
 
     # ═══ Pagination ═══
 
+    def _request(self, ep: dict, body: dict) -> dict:
+        """Dispatch to _get or _post based on endpoint method field (default POST)."""
+        method = ep.get("method", "POST").upper()
+        path = ep["path"]
+        url = f"{self._base_url}{path}"
+        if method == "GET":
+            return self._get(url, body)
+        else:
+            return self._post(url, body)
+
+    def _extract_list(self, resp: dict, ep: dict) -> list:
+        """Extract list from response using optional response_path config."""
+        path = ep.get("response_path", "data.list")
+        items = self._resolve_path(resp, path)
+        if isinstance(items, list):
+            return items
+        data = resp.get("data")
+        if isinstance(data, list):
+            return data
+        return []
+
     def _fetch_paginated(self, ep: dict, base_body: dict = None) -> list:
         path = ep["path"]
         pagination = ep.get("pagination")
         base_url = self._base_url
 
         if base_body is None:
-            base_body = {}
+            base_body = dict(ep.get("body", {}))
 
-        if not pagination:
-            resp = self._post(f"{base_url}{path}", base_body)
+        ptype = pagination.get("type") if pagination else None
+
+        # No pagination — single request
+        if not ptype:
+            resp = self._request(ep, base_body)
             if self.check_response(resp):
-                return resp.get("data", {}).get("list", resp.get("data", []))
+                return self._extract_list(resp, ep)
             return []
 
-        ptype = pagination["type"]
         size = pagination.get("size", 20)
         stop_on = pagination.get("stop_on", "empty_list")
         results = []
@@ -213,10 +245,10 @@ class BaseClient:
                 body = dict(base_body)
                 body["offset"] = offset
                 body["limit"] = size
-                resp = self._post(f"{base_url}{path}", body)
+                resp = self._request(ep, body)
                 if not self.check_response(resp):
                     break
-                items = resp.get("data", {}).get("list", resp.get("data", []))
+                items = self._extract_list(resp, ep)
                 if not items:
                     break
                 results.extend(items)
@@ -228,17 +260,22 @@ class BaseClient:
                 body = dict(base_body)
                 body["page"] = page
                 body["page_size"] = size
-                resp = self._post(f"{base_url}{path}", body)
+                resp = self._request(ep, body)
                 if not self.check_response(resp):
                     break
-                items = resp.get("data", {}).get("list", resp.get("data", []))
+                items = self._extract_list(resp, ep)
                 if not items:
                     break
                 results.extend(items)
                 if stop_on == "empty_list" and len(items) < size:
                     break
 
-        return results
+        else:
+            # Unknown pagination type — single request
+            resp = self._request(ep, base_body)
+            if self.check_response(resp):
+                results = self._extract_list(resp, ep)
+            return results
 
     # ═══ Template ═══
 
@@ -504,7 +541,12 @@ class BaseClient:
 
     def check_response(self, resp_data: dict) -> bool:
         code = resp_data.get("code")
-        return code in (200, "S_OK", 0)
+        if code in (200, "S_OK", 0):
+            return True
+        status = resp_data.get("status")
+        if status is not None and status == 0:
+            return True
+        return False
 
     def build_headers(self) -> dict:
         return self._default_headers

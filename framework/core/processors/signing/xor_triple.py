@@ -25,7 +25,7 @@ class XorTripleSigning(SigningProcessor):
             "required": ["read_key", "write_key", "p3_key"],
         }
 
-    def sign(self, url: str, headers: dict) -> dict:
+    def sign(self, url: str, headers: dict, params: dict = None) -> tuple:
         read_key = bytes.fromhex(self.params["read_key"])
         write_key = bytes.fromhex(self.params["write_key"])
         p3_key = bytes.fromhex(self.params["p3_key"])
@@ -47,7 +47,7 @@ class XorTripleSigning(SigningProcessor):
         headers["p2"] = p2
         headers["p3"] = p3
         headers["timestamp"] = str(int(time.time()))
-        return headers
+        return headers, {}
 
     @staticmethod
     def _xor_hex(h: str, key: bytes) -> str:
