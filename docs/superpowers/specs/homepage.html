@@ -183,15 +183,35 @@ body::before {
 .modal .btn-row { display:flex; gap:8px; margin-top:22px; justify-content:flex-end; }
 .hidden { display:none !important; }
 
-/* ── Toast ── */
-.toast {
-  position:fixed; bottom:32px; right:32px; z-index:200;
-  background:var(--surface-2); backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px);
-  border:1px solid var(--border); color:var(--text);
-  padding:11px 24px; border-radius:var(--radius-sm); font-size:13px;
-  animation:toastIn .4s var(--easing); box-shadow:var(--shadow-md);
+/* ── Device Indicator ── */
+.device-indicator {
+  font-size: 11px; padding: 3px 8px; border-radius: 5px;
+  font-weight: 500; display: inline-flex; align-items: center; gap: 4px;
 }
-@keyframes toastIn { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+.device-indicator.online { background: rgba(52,211,153,0.15); color: var(--success); }
+.device-indicator.offline { background: rgba(248,113,113,0.15); color: var(--danger); }
+.device-indicator.none { color: var(--text-muted); }
+
+/* ── Device Modal Rows ── */
+.device-modal-row { margin-top: 12px; }
+.device-modal-row label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.device-modal-row select, .device-modal-row input {
+  width: 100%; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: rgba(255,255,255,0.04);
+  color: var(--text); font-size: 13px; font-family: inherit;
+}
+.device-modal-row select:focus, .device-modal-row input:focus {
+  outline: none; border-color: var(--accent);
+}
+
+/* ── Toast ── */
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: rgba(10,10,12,0.92); color: var(--text); padding: 10px 24px;
+  border-radius: 12px; font-size: 13px; z-index: 999;
+  backdrop-filter: blur(20px); border: 1px solid var(--border);
+  transition: all 300ms cubic-bezier(0.16, 1, 0.3, 1); opacity: 0; }
+.toast.show { opacity: 1; }
+.toast.error { border-color: var(--danger); color: var(--danger); }
 
 @media (max-width: 768px) {
   body { padding:20px 14px; }
@@ -295,6 +315,30 @@ body::before {
 
 <div class="toast hidden" id="toast"></div>
 
+<!-- Device Modal -->
+<div class="modal-overlay hidden" id="deviceModal">
+<div class="modal" style="max-width:480px">
+<h3 id="deviceModalTitle">设备配置</h3>
+<div class="device-modal-row">
+  <label>ADB 设备</label>
+  <select id="deviceSelect"><option value="">— 点击"刷新设备列表" —</option></select>
+  <div class="btn btn-ghost" style="font-size:11px;padding:4px 10px;margin-top:6px" onclick="refreshDevices()">刷新设备列表</div>
+</div>
+<div class="device-modal-row">
+  <label>目标应用包名</label>
+  <input id="devicePkg" placeholder="例如: com.sybl.voiceroom" autocomplete="off">
+</div>
+<div class="device-modal-row">
+  <label>Frida 脚本文件名</label>
+  <input id="deviceScript" placeholder="hook_send_msg.js" value="hook_send_msg.js" autocomplete="off">
+</div>
+<div id="deviceStatus" style="font-size:12px;margin-top:10px;display:none"></div>
+<div class="btn-row">
+  <div class="btn btn-ghost" onclick="closeDeviceModal()">取消</div>
+  <div class="btn btn-primary" onclick="saveDevice()">保存</div>
+</div>
+</div></div>
+
 <script>
 // ═══ SVG Icons ═══
 var I = {
@@ -327,12 +371,14 @@ function init() {
     else if (act==='stop') stopTask(id);
     else if (act==='detail') showDetail(id);
     else if (act==='config') showConfig(id);
+    else if (act==='device') openDeviceModal(id);
     e.stopPropagation();
   });
   document.getElementById('addAppModal').addEventListener('click', function(e){ if(e.target===this) closeAddModal(); });
   document.getElementById('configModal').addEventListener('click', function(e){ if(e.target===this) closeConfigModal(); });
   document.getElementById('detailModal').addEventListener('click', function(e){ if(e.target===this) closeDetailModal(); });
   document.getElementById('accountModal').addEventListener('click', function(e){ if(e.target===this) closeAccountModal(); });
+  document.getElementById('deviceModal').addEventListener('click', function(e){ if(e.target===this) closeDeviceModal(); });
 }
 
 function updateClock() {
@@ -354,6 +400,7 @@ function fetchApps() {
 function mapApp(api) {
   return {
     id: api.app_name === '漂漂' ? 'piaopiao' : (api.app_name === '梦音' ? 'mengyin' : api.app_name.toLowerCase()),
+    app_name: api.app_name,
     name: api.app_name,
     subtitle: api.mode === 'rest' ? 'REST API' : (api.mode === 'frida_nim' ? 'Frida NIM' : ''),
     status: api.status,
@@ -506,6 +553,7 @@ function buttonHTML(a) {
       +'<div class="btn btn-danger" data-action="stop" data-appid="'+a.id+'">'+I.stop+' 停止</div>';
   btns += '<div class="btn btn-ghost" data-action="detail" data-appid="'+a.id+'">'+I.list+' 详情</div>';
   btns += '<div class="btn btn-ghost" data-action="config" data-appid="'+a.id+'">'+I.gear+' 设置</div>';
+  btns += '<div class="btn btn-ghost" style="font-size:10px;padding:2px 8px" data-action="device" data-appid="'+a.id+'">设备</div>';
   return btns;
 }
 
@@ -521,9 +569,16 @@ function buildEmptyCard() {
 
 // ═══ Actions (call API) ═══
 function startTask(id) {
-  fetch('/api/app/'+encodeURIComponent(id)+'/start', {method:'POST'}).then(function(r){return r.json()}).then(function(d) {
-    if (d.success) { toast('已开始'); fetchApps(); } else { toast('启动失败'); }
-  });
+  fetch('/api/app/'+encodeURIComponent(id)+'/start', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d.success) {
+        toast('已开始');
+        fetchApps();
+      } else {
+        toast(d.error || '启动失败', true);
+      }
+    });
 }
 function pauseTask(id) {
   fetch('/api/app/'+encodeURIComponent(id)+'/pause', {method:'POST'}).then(function(r){return r.json()}).then(function(d) {
@@ -571,9 +626,82 @@ function addApp() {
   toast(n+' 已添加');
 }
 
-function toast(m) {
-  var e = document.getElementById('toast'); e.textContent = m; e.classList.remove('hidden');
-  clearTimeout(e._t); e._t = setTimeout(function(){ e.classList.add('hidden'); }, 2500);
+function toast(msg, isError) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(function(){ el.classList.remove('show'); }, 3000);
+}
+
+// === Device Management ===
+var _deviceAppId = null;
+
+function openDeviceModal(appId) {
+  _deviceAppId = appId;
+  var app = (apps || []).find(function(a){ return a.app_name === appId; });
+  document.getElementById('deviceModalTitle').textContent = (app ? app.app_name : appId) + ' 设备配置';
+  document.getElementById('deviceModal').classList.remove('hidden');
+
+  fetch('/api/app/' + encodeURIComponent(appId) + '/device')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      document.getElementById('deviceSelect').value = d.serial || '';
+      document.getElementById('devicePkg').value = d.app_package || '';
+      document.getElementById('deviceScript').value = d.script_name || 'hook_send_msg.js';
+    });
+
+  refreshDevices();
+}
+
+function closeDeviceModal() {
+  document.getElementById('deviceModal').classList.add('hidden');
+  _deviceAppId = null;
+}
+
+function refreshDevices() {
+  var sel = document.getElementById('deviceSelect');
+  sel.innerHTML = '<option value="">— 扫描中...</option>';
+  fetch('/api/devices')
+    .then(function(r){ return r.json(); })
+    .then(function(devices){
+      sel.innerHTML = devices.length === 0
+        ? '<option value="">无可用设备 — 请确认 ADB 已连接</option>'
+        : devices.map(function(d){
+            var label = d.serial + (d.model ? ' (' + d.model + ')' : '')
+                      + ' [Android ' + (d.android_version || '?') + ']';
+            var disabled = d.status !== 'device' ? ' disabled' : '';
+            return '<option value="' + d.serial + '"' + disabled + '>' + label + '</option>';
+          }).join('');
+    })
+    .catch(function(){ sel.innerHTML = '<option value="">设备扫描失败 — ADB 未安装或未连接</option>'; });
+}
+
+function saveDevice() {
+  var sel = document.getElementById('deviceSelect');
+  var pkg = document.getElementById('devicePkg').value.trim();
+  var sn = document.getElementById('deviceScript').value.trim() || 'hook_send_msg.js';
+  var statusEl = document.getElementById('deviceStatus');
+
+  if (!sel.value) { statusEl.textContent = '请选择一个设备'; statusEl.style.color = 'var(--danger)'; statusEl.style.display = ''; return; }
+  if (!pkg) { statusEl.textContent = '请输入目标应用包名'; statusEl.style.color = 'var(--danger)'; statusEl.style.display = ''; return; }
+
+  statusEl.textContent = '保存中...'; statusEl.style.color = 'var(--text-muted)'; statusEl.style.display = '';
+
+  fetch('/api/app/' + encodeURIComponent(_deviceAppId) + '/device', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ serial: sel.value, app_package: pkg, script_name: sn })
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if (d.success) {
+      statusEl.textContent = '✓ 设备配置已保存';
+      statusEl.style.color = 'var(--success)';
+      setTimeout(closeDeviceModal, 1500);
+    } else {
+      statusEl.textContent = d.error || '保存失败';
+      statusEl.style.color = 'var(--danger)';
+    }
+  });
 }
 
 // ═══ Account Management ═══
@@ -701,7 +829,7 @@ function doLogin() {
   });
 }
 
-document.addEventListener('keydown', function(e) { if (e.key==='Escape') { closeAddModal(); closeConfigModal(); closeDetailModal(); closeAccountModal(); } });
+document.addEventListener('keydown', function(e) { if (e.key==='Escape') { closeAddModal(); closeConfigModal(); closeDetailModal(); closeAccountModal(); closeDeviceModal(); } });
 window.addEventListener('load', init);
 </script>
 </body>
