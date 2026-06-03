@@ -11,6 +11,7 @@ import urllib3
 
 from .state_manager import StateManager
 from .processor_registry import ProcessorRegistry
+from framework.bridge.frida_session import FridaDisconnectedError
 
 
 class BaseClient:
@@ -33,6 +34,8 @@ class BaseClient:
         self._signer = ProcessorRegistry.load(pipeline.get("signing", "plaintext"), "signing")
         self._auth_processor = ProcessorRegistry.load(pipeline.get("auth", "manual-token"), "auth")
         self._messenger = ProcessorRegistry.load(pipeline.get("messaging", "none"), "messaging")
+
+        self._frida_session = None
 
         self.session = requests.Session()
         self.session.verify = False
@@ -317,7 +320,6 @@ class BaseClient:
             self._progress = self.state.load_progress()
             start_idx = self._progress.get("current_room_index", 0)
 
-        consecutive_failures = 0
         for idx in range(start_idx, len(self._rooms)):
             if not self._wait_if_paused():
                 break
@@ -325,14 +327,12 @@ class BaseClient:
             self._notify("progress", {"current_room_index": idx, "room": room})
             try:
                 self.run_room(room, idx)
-                consecutive_failures = 0
+            except FridaDisconnectedError:
+                self._notify("error", "Frida 会话已断开，请重新连接设备后继续")
+                self.pause()
+                return
             except Exception as e:
-                consecutive_failures += 1
                 self._notify("error", f"房间 {room.get('name')} 失败: {e}")
-                if consecutive_failures >= 3:
-                    self._notify("error", "连续3间房间失败，暂停")
-                    self.pause()
-                    break
 
         if self._running:
             self._notify("done", "全部房间完成")
@@ -425,6 +425,19 @@ class BaseClient:
             self._progress = {}
             self.state.reset_progress()
 
+    def set_frida_session(self, session) -> None:
+        """Set the Frida session used by frida-rpc messaging processor"""
+        self._frida_session = session
+
+    def clear_frida_session(self) -> None:
+        """Clear the Frida session (called on stop)"""
+        if self._frida_session:
+            try:
+                self._frida_session.disconnect()
+            except Exception:
+                pass
+            self._frida_session = None
+
     @property
     def status(self) -> str:
         if not self._running:
@@ -452,6 +465,7 @@ class BaseClient:
             "data_source": self._data_source,
             "period": self._period,
             "gender": self._gender,
+            "messaging_type": self._messenger.name,
         }
 
     def _notify(self, event: str, payload) -> None:

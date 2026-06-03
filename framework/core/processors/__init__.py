@@ -11,6 +11,7 @@ from .auth.sms_login import SmsLoginAuth
 from .messaging.rest_json import RestJsonMessaging
 from .messaging.none import NoneMessaging
 from .messaging.rongcloud_tcp import RongcloudTcpMessaging
+from .messaging.frida_rpc import FridaRpcMessaging
 
 ProcessorRegistry.register(PlaintextEncryption)
 ProcessorRegistry.register(AesCbcEncryption)
@@ -22,3 +23,4 @@ ProcessorRegistry.register(SmsLoginAuth)
 ProcessorRegistry.register(RestJsonMessaging)
 ProcessorRegistry.register(NoneMessaging)
 ProcessorRegistry.register(RongcloudTcpMessaging)
+ProcessorRegistry.register(FridaRpcMessaging)
