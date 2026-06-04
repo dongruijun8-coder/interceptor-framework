@@ -70,6 +70,7 @@ class BaseClient:
         self._current_user = {}          # 当前正在发的用户 {uid, nick, text}
         self._recent_sent: list[dict] = []  # 最近已发 (最多 20 条)
         self._recent_failed: list[dict] = []  # 最近失败
+        self._ranking_users: list[dict] = []   # 当前房间排行用户（含发送状态）
 
         # Header defaults from config
         self._default_headers = self.config.get("server", {}).get("default_headers", {}).copy()
@@ -100,7 +101,11 @@ class BaseClient:
         if "steps" in ep:
             return self._execute_steps(ep)
         else:
-            return self._fetch_paginated(ep)
+            rooms = self._fetch_paginated(ep)
+            mapping = ep.get("output_mapping", {})
+            if mapping:
+                rooms = [self._map_fields(r, mapping) for r in rooms]
+            return rooms
 
     def _execute_steps(self, ep: dict) -> list:
         all_rooms = []
@@ -418,6 +423,10 @@ class BaseClient:
 
         users.sort(key=lambda u: u.get("amount", 0), reverse=True)
 
+        # Store ranking users with initial status for frontend display
+        with self._lock:
+            self._ranking_users = [dict(u, status="wait") for u in users]
+
         for user in users:
             if not self._wait_if_paused():
                 break
@@ -431,11 +440,15 @@ class BaseClient:
             template = random.choice(self._templates)
             text = template.replace("{nick}", nick).replace("{room_name}", room.get("name", ""))
 
-            # 记录当前正在发的用户
+            # 记录当前正在发的用户 + 标记排行榜状态
             with self._lock:
                 self._current_user = {"uid": uid, "nick": nick, "text": text,
                                        "room": room.get("name", ""),
                                        "time": time.strftime("%H:%M:%S")}
+                for ru in self._ranking_users:
+                    if str(ru.get("uid")) == str(uid):
+                        ru["status"] = "sending"
+                        break
 
             try:
                 result = self.send_message(uid, text)
@@ -459,6 +472,11 @@ class BaseClient:
                     self._recent_sent.insert(0, entry)
                     if len(self._recent_sent) > 20:
                         self._recent_sent = self._recent_sent[:20]
+                    # Update ranking user status
+                    for ru in self._ranking_users:
+                        if str(ru.get("uid")) == str(uid):
+                            ru["status"] = "sent"
+                            break
                 self._notify("sent", {"uid": uid, "nick": nick, "text": text})
             else:
                 with self._lock:
@@ -469,6 +487,11 @@ class BaseClient:
                     self._recent_failed.insert(0, entry)
                     if len(self._recent_failed) > 20:
                         self._recent_failed = self._recent_failed[:20]
+                    # Update ranking user status
+                    for ru in self._ranking_users:
+                        if str(ru.get("uid")) == str(uid):
+                            ru["status"] = "failed"
+                            break
                 self._notify("failed", {
                     "uid": uid, "nick": nick,
                     "error": result.get("error", "unknown"),
@@ -560,6 +583,8 @@ class BaseClient:
             "available_data_sources": self._data_sources,
             "available_periods": self._periods,
             "available_genders": self._genders,
+            "templates": list(self._templates),
+            "ranking_users": [dict(ru) for ru in self._ranking_users],
         }
 
     def _notify(self, event: str, payload) -> None:

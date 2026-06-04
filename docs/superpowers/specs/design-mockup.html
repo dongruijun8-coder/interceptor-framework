@@ -178,10 +178,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
   <div class="panel panel-right">
     <div class="send-section">
       <h4>发送设置</h4>
-      <div class="setting-row"><label>间隔</label><input type="number" id="cfgInterval" value="3" min="1" max="60"> 秒</div>
-      <div class="setting-row"><label>数据源</label><select id="cfgSource"></select></div>
-      <div class="setting-row"><label>时段</label><select id="cfgPeriod"></select></div>
-      <div class="setting-row"><label>性别</label><select id="cfgGender"></select></div>
+      <div class="setting-row"><label>间隔</label><input type="number" id="cfgInterval" value="3" min="1" max="60" onchange="onSettingChange()"> 秒</div>
+      <div class="setting-row"><label>数据源</label><select id="cfgSource" onchange="onSettingChange()"></select></div>
+      <div class="setting-row"><label>时段</label><select id="cfgPeriod" onchange="onSettingChange()"></select></div>
+      <div class="setting-row"><label>性别</label><select id="cfgGender" onchange="onSettingChange()"></select></div>
     </div>
     <div class="send-section">
       <h4>话术模板</h4>
@@ -198,12 +198,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
   <h3 id="settingsTitle">设置</h3>
   <label>发信间隔（秒）</label><input type="number" id="setInterval" value="3" min="1" max="60">
   <label>话术模板（一行一条）</label>
-  <textarea id="setTemplates" style="height:80px">{nick} 你好，来我房间玩嘛～
-{nick} 在吗？聊聊呀
-{nick} 哈喽～ 来听听歌吧</textarea>
+  <textarea id="setTemplates" style="height:80px"></textarea>
   <div class="btn-row">
     <div class="btn btn-ghost" onclick="closeSettings()">关闭</div>
-    <div class="btn btn-success" onclick="closeSettings()">保存</div>
+    <div class="btn btn-success" onclick="saveSettings()">保存</div>
   </div>
 </div></div>
 
@@ -245,7 +243,15 @@ function patchRender(old) {
   if (old.done_rooms !== appData.done_rooms || old.sent !== appData.sent || old.failed !== appData.failed || old.current_room !== appData.current_room) {
     updateProgress();
     updateRooms();
+    updateRanking();
   }
+  // Always refresh ranking and log when running (status changes on each user)
+  var oldUsers = JSON.stringify(old.ranking_users || []);
+  var newUsers = JSON.stringify(appData.ranking_users || []);
+  if (oldUsers !== newUsers) updateRanking();
+  var oldLog = JSON.stringify((old.recent_sent||[]).concat(old.recent_failed||[]));
+  var newLog = JSON.stringify((appData.recent_sent||[]).concat(appData.recent_failed||[]));
+  if (oldLog !== newLog) updateLog();
 }
 
 function updateTopBar() {
@@ -288,10 +294,51 @@ function updateRooms() {
 
 function updateRanking() {
   document.getElementById('rankingTitle').innerHTML = (appData.data_source || '贡献榜') + ' · ' + (appData.period || '—') + ' · ' + (appData.current_room || '—') + ' <span class="count">' + (appData.done_rooms || 0) + '/' + (appData.total_rooms || 0) + '</span>';
-  // Ranking table shows real data from backend when available
-  document.getElementById('rankingBody').innerHTML =
-    '<table class="ranking-table"><thead><tr><th>#</th><th>用户</th><th>UID</th><th style="text-align:right">贡献</th><th>状态</th></tr></thead>'
-    + '<tbody><tr><td colspan="5" class="empty-note">排行数据将在房间遍历时实时显示</td></tr></tbody></table>';
+
+  var users = appData.ranking_users || [];
+  var html = '<table class="ranking-table"><thead><tr><th>#</th><th>用户</th><th>UID</th><th style="text-align:right">贡献</th><th>状态</th></tr></thead><tbody>';
+  if (users.length === 0) {
+    html += '<tr><td colspan="5" class="empty-note">排行数据将在房间遍历时实时显示</td></tr>';
+  } else {
+    users.forEach(function(u, i) {
+      var st = u.status || 'wait';
+      var rowClass = st === 'sent' ? 'row-sent' : st === 'sending' ? 'row-sending' : st === 'failed' ? 'row-fail' : '';
+      var tagClass = st === 'sent' ? 'tag-sent' : st === 'sending' ? 'ri-prog' : st === 'failed' ? 'tag-fail' : '';
+      var tagText = st === 'sent' ? '已发' : st === 'sending' ? '发送中' : st === 'failed' ? '失败' : '—';
+      html += '<tr class="' + rowClass + '">'
+        + '<td class="rn">' + (i + 1) + '</td>'
+        + '<td>' + (u.nick || '') + '</td>'
+        + '<td class="uid">' + (u.uid || '') + '</td>'
+        + '<td class="amount">' + (u.amount || 0) + '</td>'
+        + '<td><span class="status-tag ' + tagClass + '">' + tagText + '</span></td>'
+        + '</tr>';
+    });
+  }
+  html += '</tbody></table>';
+  document.getElementById('rankingBody').innerHTML = html;
+
+  // Render send log
+  updateLog();
+}
+
+function updateLog() {
+  var sent = appData.recent_sent || [];
+  var failed = appData.recent_failed || [];
+  var html = '';
+  // Merge and sort by time (most recent first)
+  var all = [];
+  sent.forEach(function(e) { all.push({type:'sent', time:e.time, uid:e.uid, nick:e.nick, text:e.text||'', room:e.room||''}); });
+  failed.forEach(function(e) { all.push({type:'failed', time:e.time, uid:e.uid, nick:e.nick, error:e.error||'', room:e.room||''}); });
+  all.sort(function(a,b) { return b.time.localeCompare(a.time); });
+  all.slice(0, 30).forEach(function(e) {
+    if (e.type === 'sent') {
+      html += '<div class="log-item" style="font-size:12px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.04)"><span class="status-tag tag-sent">✓</span> <b>' + e.nick + '</b> (' + e.uid + ') ' + e.text + ' <span style="color:var(--text-muted);float:right">' + e.time + '</span></div>';
+    } else {
+      html += '<div class="log-item" style="font-size:12px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.04)"><span class="status-tag tag-fail">✗</span> <b>' + e.nick + '</b> (' + e.uid + ') ' + e.error + ' <span style="color:var(--text-muted);float:right">' + e.time + '</span></div>';
+    }
+  });
+  if (!html) html = '<div class="empty-note">等待任务启动...</div>';
+  document.getElementById('logList').innerHTML = html;
 }
 
 function updateSettings() {
@@ -320,10 +367,13 @@ function updateSettings() {
 }
 
 function updateTemplates() {
-  document.getElementById('tplList').innerHTML =
-    '<div class="tpl-item"><span class="nick">{nick}</span> 你好，来我房间玩嘛～</div>'
-    + '<div class="tpl-item"><span class="nick">{nick}</span> 在吗？聊聊呀</div>'
-    + '<div class="tpl-item"><span class="nick">{nick}</span> 哈喽～ 来听听歌吧</div>';
+  var tpls = appData.templates || [];
+  if (!tpls.length) tpls = ['无话术，请在设置中添加'];
+  var html = '';
+  tpls.forEach(function(t) {
+    html += '<div class="tpl-item">' + t + '</div>';
+  });
+  document.getElementById('tplList').innerHTML = html;
 }
 
 // ═══ Actions ═══
@@ -355,8 +405,38 @@ function scanRooms() {
       }
     });
 }
-function openSettings() { document.getElementById('settingsModal').classList.remove('hidden'); }
+function openSettings() {
+  var modal = document.getElementById('settingsModal');
+  document.getElementById('setInterval').value = appData.interval || 3;
+  document.getElementById('setTemplates').value = (appData.templates || ['{nick} 你好~']).join('\n');
+  modal.classList.remove('hidden');
+}
 function closeSettings() { document.getElementById('settingsModal').classList.add('hidden'); }
+function saveSettings() {
+  var templates = document.getElementById('setTemplates').value.split('\n').filter(function(l) { return l.trim(); });
+  var interval = parseInt(document.getElementById('setInterval').value) || 5;
+  var body = { templates: templates, send_interval: interval };
+  fetch('/api/app/' + encodeURIComponent(APP_ID) + '/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.success) { closeSettings(); fetchApp(); }
+  });
+}
+function onSettingChange() {
+  var body = {
+    send_interval: parseInt(document.getElementById('cfgInterval').value) || 5,
+    data_source: document.getElementById('cfgSource').value,
+    period: document.getElementById('cfgPeriod').value,
+    gender: document.getElementById('cfgGender').value,
+  };
+  fetch('/api/app/' + encodeURIComponent(APP_ID) + '/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+}
 document.getElementById('settingsModal').addEventListener('click', function(e) { if (e.target === this) closeSettings(); });
 document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeSettings(); });
 </script>
