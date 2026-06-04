@@ -408,6 +408,8 @@ function mapApp(api) {
     totalRooms: api.total_rooms,
     doneRooms: api.done_rooms,
     sent: api.sent,
+    sentTodayTotal: api.sent_today_total || api.sent || 0,
+    roomsTodayTotal: api.rooms_today_total || 0,
     failed: api.failed,
     interval: api.interval,
     currentRoom: api.current_room || null,
@@ -424,9 +426,9 @@ function mapApp(api) {
 function updateStats() {
   var totalSent = 0, active = 0, totalAttempts = 0, doneRooms = 0;
   apps.forEach(function(a) {
-    totalSent += a.sent;
-    doneRooms += a.doneRooms;
-    totalAttempts += a.sent + a.failed;
+    totalSent += a.sentTodayTotal || a.sent;
+    doneRooms += a.roomsTodayTotal || a.doneRooms;
+    totalAttempts += (a.sentTodayTotal || a.sent) + a.failed;
     if (a.status === 'running') active++;
   });
   var rate = totalAttempts > 0 ? Math.round(totalSent / totalAttempts * 100) : 100;

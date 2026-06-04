@@ -63,19 +63,25 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .ranking-table{width:100%;border-collapse:collapse;font-size:13px}
 .ranking-table th{text-align:left;padding:10px 16px;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(245,245,247,0.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);z-index:1}
 .ranking-table td{padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.03)}
-.ranking-table tbody tr{transition:background .12s}
+.ranking-table tbody tr{transition:background 0.25s, opacity 0.25s}
 .ranking-table tbody tr:hover{background:rgba(0,0,0,0.02)}
-.ranking-table .rn{font-weight:500;color:var(--text-muted);font-size:12px;width:36px}
+.ranking-table .rn{font-weight:500;color:var(--text-muted);font-size:12px;width:32px;text-align:center}
 .ranking-table .rn.top{color:var(--warning)}
 .ranking-table .uid{font-family:ui-monospace,'SF Mono','Cascadia Code',monospace;font-size:11px;color:var(--text-muted)}
 .ranking-table .amount{font-weight:500;text-align:right}
+.ranking-table .gender{text-align:center;font-size:13px;width:40px}
+.ranking-table .gender.male{color:#007AFF}
+.ranking-table .gender.female{color:#FF2D55}
+.ranking-table .gender.unknown{color:var(--text-muted)}
 .row-sent{opacity:.32}
 .row-sent td{text-decoration:line-through;text-decoration-color:var(--success)}
-.row-fail td{color:var(--danger)}
-.row-sending td{background:var(--accent-bg)}
-.status-tag{font-size:10px;padding:3px 10px;border-radius:10px;font-weight:500;white-space:nowrap}
+.row-fail td{color:var(--danger);border-left:2px solid var(--danger)}
+.row-sending td{animation:sendPulse 1.5s ease-in-out infinite}
+@keyframes sendPulse{0%,100%{background:var(--accent-bg)}50%{background:rgba(0,122,255,0.15)}}
+.status-tag{font-size:10px;padding:3px 10px;border-radius:10px;font-weight:500;white-space:nowrap;transition:all 0.2s var(--easing)}
 .tag-sent{background:var(--success-bg);color:var(--success)}
 .tag-fail{background:var(--danger-bg);color:var(--danger)}
+.tag-sending{background:var(--accent-bg);color:var(--accent)}
 .empty-note{padding:40px;text-align:center;color:var(--text-muted);font-size:13px}
 
 .send-section{padding:18px 20px;border-bottom:1px solid var(--border)}
@@ -93,6 +99,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .log-err .log-msg{color:var(--danger)}
 .log-info .log-msg{color:var(--text-muted)}
 .log-msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#logList{max-height:260px;overflow-y:auto}
+#logList::-webkit-scrollbar{width:3px}
+#logList::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.12);border-radius:3px}
+
+.pb-today{font-size:12px;color:var(--text-muted);display:flex;gap:16px}
+.pb-today b{color:var(--text);font-weight:600}
 
 .btn{font-size:12px;padding:7px 16px;border-radius:var(--radius-sm);font-weight:500;cursor:pointer;border:none;transition:all .15s var(--easing);font-family:var(--font);display:inline-flex;align-items:center;gap:5px;letter-spacing:-0.1px}
 .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -157,6 +169,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
   <div class="pb-track"><div class="pb-fill" id="pbFill" style="width:0%"></div></div>
   <span class="pb-stat">已发 <span class="ok" id="pbSent">0</span></span>
   <span class="pb-stat">失败 <span class="fl" id="pbFailed">0</span></span>
+  <span class="pb-today">今日已发 <b id="pbTodaySent">0</b> 人</span>
   <span style="font-size:12px;color:var(--text-muted);margin-left:auto" id="pbRoom">—</span>
 </div>
 
@@ -230,28 +243,35 @@ function fetchApp() {
 }
 
 function fullRender() {
+  _lastRankingRoom = '';
+  _knownLogKeys = {};
   updateTopBar();
   updateProgress();
   updateRooms();
-  updateRanking();
+  updateRanking(true);
   updateSettings();
   updateTemplates();
 }
 
 function patchRender(old) {
   if (old.status !== appData.status) updateTopBar();
-  if (old.done_rooms !== appData.done_rooms || old.sent !== appData.sent || old.failed !== appData.failed || old.current_room !== appData.current_room) {
+  var roomChanged = (old.current_room !== appData.current_room);
+  if (old.done_rooms !== appData.done_rooms || old.sent !== appData.sent || old.failed !== appData.failed || roomChanged) {
     updateProgress();
     updateRooms();
-    updateRanking();
   }
-  // Always refresh ranking and log when running (status changes on each user)
-  var oldUsers = JSON.stringify(old.ranking_users || []);
-  var newUsers = JSON.stringify(appData.ranking_users || []);
-  if (oldUsers !== newUsers) updateRanking();
-  var oldLog = JSON.stringify((old.recent_sent||[]).concat(old.recent_failed||[]));
-  var newLog = JSON.stringify((appData.recent_sent||[]).concat(appData.recent_failed||[]));
-  if (oldLog !== newLog) updateLog();
+  // Full rebuild on room change, incremental on status changes
+  if (roomChanged) {
+    updateRanking(true);
+  } else {
+    var oldUsers = JSON.stringify(old.ranking_users || []);
+    var newUsers = JSON.stringify(appData.ranking_users || []);
+    if (oldUsers !== newUsers) updateRanking(false);
+  }
+  // Log: only update if new entries
+  var oldLen = (old.recent_sent||[]).length + (old.recent_failed||[]).length;
+  var newLen = (appData.recent_sent||[]).length + (appData.recent_failed||[]).length;
+  if (newLen !== oldLen) updateLog();
 }
 
 function updateTopBar() {
@@ -272,6 +292,7 @@ function updateProgress() {
   document.getElementById('pbFill').style.width = pct + '%';
   document.getElementById('pbSent').textContent = a.sent;
   document.getElementById('pbFailed').textContent = a.failed;
+  document.getElementById('pbTodaySent').textContent = a.sent_today_total || 0;
   document.getElementById('pbRoom').textContent = a.current_room ? ('当前: ' + a.current_room) : '—';
 }
 
@@ -292,53 +313,126 @@ function updateRooms() {
   document.getElementById('roomFooter').classList.toggle('hidden', a.total_rooms === 0);
 }
 
-function updateRanking() {
+var _lastRankingRoom = '';
+
+function updateRanking(forceFull) {
   document.getElementById('rankingTitle').innerHTML = (appData.data_source || '贡献榜') + ' · ' + (appData.period || '—') + ' · ' + (appData.current_room || '—') + ' <span class="count">' + (appData.done_rooms || 0) + '/' + (appData.total_rooms || 0) + '</span>';
 
   var users = appData.ranking_users || [];
-  var html = '<table class="ranking-table"><thead><tr><th>#</th><th>用户</th><th>UID</th><th style="text-align:right">贡献</th><th>状态</th></tr></thead><tbody>';
-  if (users.length === 0) {
-    html += '<tr><td colspan="5" class="empty-note">排行数据将在房间遍历时实时显示</td></tr>';
+  var currentRoom = appData.current_room || '';
+  var roomChanged = (currentRoom !== _lastRankingRoom);
+  if (forceFull) roomChanged = true;
+
+  // Full rebuild: empty table, room changed, or first load
+  if (roomChanged || !document.querySelector('#rankingBody table')) {
+    _lastRankingRoom = currentRoom;
+    var html = '<table class="ranking-table"><thead><tr><th>#</th><th>用户</th><th>UID</th><th>性别</th><th style="text-align:right">贡献</th><th>状态</th></tr></thead><tbody>';
+    if (users.length === 0) {
+      html += '<tr><td colspan="6" class="empty-note">排行数据将在房间遍历时实时显示</td></tr>';
+    } else {
+      users.forEach(function(u, i) {
+        html += buildRankingRow(u, i);
+      });
+    }
+    html += '</tbody></table>';
+    document.getElementById('rankingBody').innerHTML = html;
   } else {
+    // Incremental: update existing rows in-place
+    var tbody = document.querySelector('#rankingBody tbody');
+    if (!tbody) { updateRanking(true); return; }
     users.forEach(function(u, i) {
+      var row = tbody.querySelector('tr[data-uid="' + u.uid + '"]');
+      if (!row) {
+        // New user row — rebuild (shouldn't happen in same room)
+        updateRanking(true); return;
+      }
       var st = u.status || 'wait';
       var rowClass = st === 'sent' ? 'row-sent' : st === 'sending' ? 'row-sending' : st === 'failed' ? 'row-fail' : '';
-      var tagClass = st === 'sent' ? 'tag-sent' : st === 'sending' ? 'ri-prog' : st === 'failed' ? 'tag-fail' : '';
+      var tagClass = 'status-tag ' + (st === 'sent' ? 'tag-sent' : st === 'sending' ? 'tag-sending' : st === 'failed' ? 'tag-fail' : '');
       var tagText = st === 'sent' ? '已发' : st === 'sending' ? '发送中' : st === 'failed' ? '失败' : '—';
-      html += '<tr class="' + rowClass + '">'
-        + '<td class="rn">' + (i + 1) + '</td>'
-        + '<td>' + (u.nick || '') + '</td>'
-        + '<td class="uid">' + (u.uid || '') + '</td>'
-        + '<td class="amount">' + (u.amount || 0) + '</td>'
-        + '<td><span class="status-tag ' + tagClass + '">' + tagText + '</span></td>'
-        + '</tr>';
+      // Only update if changed (avoids DOM thrashing)
+      if (row.className !== rowClass) row.className = rowClass;
+      var tag = row.querySelector('.status-tag');
+      if (tag && (tag.textContent !== tagText || tag.className !== tagClass)) {
+        tag.textContent = tagText;
+        tag.className = tagClass;
+      }
     });
   }
-  html += '</tbody></table>';
-  document.getElementById('rankingBody').innerHTML = html;
 
-  // Render send log
   updateLog();
 }
+
+function buildRankingRow(u, i) {
+  var st = u.status || 'wait';
+  var rowClass = st === 'sent' ? 'row-sent' : st === 'sending' ? 'row-sending' : st === 'failed' ? 'row-fail' : '';
+  var tagClass = 'status-tag ' + (st === 'sent' ? 'tag-sent' : st === 'sending' ? 'tag-sending' : st === 'failed' ? 'tag-fail' : '');
+  var tagText = st === 'sent' ? '已发' : st === 'sending' ? '发送中' : st === 'failed' ? '失败' : '—';
+  // Gender icon + color
+  var g = u.gender;
+  var genderHtml = '';
+  if (g === 1 || g === '1') genderHtml = '<td class="gender male">♂</td>';
+  else if (g === 2 || g === '2') genderHtml = '<td class="gender female">♀</td>';
+  else genderHtml = '<td class="gender unknown">—</td>';
+  return '<tr class="' + rowClass + '" data-uid="' + (u.uid || '') + '">'
+    + '<td class="rn">' + (i + 1) + '</td>'
+    + '<td>' + (u.nick || '') + '</td>'
+    + '<td class="uid">' + (u.uid || '') + '</td>'
+    + genderHtml
+    + '<td class="amount">' + (u.amount || 0) + '</td>'
+    + '<td><span class="' + tagClass + '">' + tagText + '</span></td>'
+    + '</tr>';
+}
+
+var _knownLogKeys = {};  // time+uid key → already rendered
+var _logSeq = 0;
 
 function updateLog() {
   var sent = appData.recent_sent || [];
   var failed = appData.recent_failed || [];
-  var html = '';
-  // Merge and sort by time (most recent first)
+  var logList = document.getElementById('logList');
+  var wasAtTop = logList.scrollTop < 30;
+
+  // Build ordered list, newest first
   var all = [];
-  sent.forEach(function(e) { all.push({type:'sent', time:e.time, uid:e.uid, nick:e.nick, text:e.text||'', room:e.room||''}); });
-  failed.forEach(function(e) { all.push({type:'failed', time:e.time, uid:e.uid, nick:e.nick, error:e.error||'', room:e.room||''}); });
+  sent.forEach(function(e) { all.push({type:'sent', time:e.time, uid:e.uid, nick:e.nick, text:e.text||''}); });
+  failed.forEach(function(e) { all.push({type:'failed', time:e.time, uid:e.uid, nick:e.nick, error:e.error||''}); });
   all.sort(function(a,b) { return b.time.localeCompare(a.time); });
+
+  var hasNew = false;
   all.slice(0, 30).forEach(function(e) {
+    var key = e.time + '|' + e.uid;
+    if (_knownLogKeys[key]) return;
+    _knownLogKeys[key] = true;
+    hasNew = true;
+    var div = document.createElement('div');
+    div.style.cssText = 'font-size:12px;padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)';
     if (e.type === 'sent') {
-      html += '<div class="log-item" style="font-size:12px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.04)"><span class="status-tag tag-sent">✓</span> <b>' + e.nick + '</b> (' + e.uid + ') ' + e.text + ' <span style="color:var(--text-muted);float:right">' + e.time + '</span></div>';
+      div.innerHTML = '<span class="status-tag tag-sent">✓</span> <b>' + e.nick + '</b> (' + e.uid + ') ' + e.text + ' <span style="color:var(--text-muted);float:right;margin-left:4px">' + e.time + '</span>';
     } else {
-      html += '<div class="log-item" style="font-size:12px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.04)"><span class="status-tag tag-fail">✗</span> <b>' + e.nick + '</b> (' + e.uid + ') ' + e.error + ' <span style="color:var(--text-muted);float:right">' + e.time + '</span></div>';
+      div.innerHTML = '<span class="status-tag tag-fail">✗</span> <b>' + e.nick + '</b> (' + e.uid + ') ' + e.error + ' <span style="color:var(--text-muted);float:right;margin-left:4px">' + e.time + '</span>';
     }
+    logList.insertBefore(div, logList.firstChild);
   });
-  if (!html) html = '<div class="empty-note">等待任务启动...</div>';
-  document.getElementById('logList').innerHTML = html;
+
+  // Trim old entries beyond 30
+  while (logList.children.length > 30) {
+    logList.removeChild(logList.lastChild);
+  }
+
+  // Auto-scroll to top if user is at top, otherwise preserve position
+  if (hasNew && wasAtTop) logList.scrollTop = 0;
+
+  // Show empty state
+  if (logList.children.length === 0 && !hasNew) {
+    logList.innerHTML = '<div class="empty-note">等待任务启动...</div>';
+    _knownLogKeys = {};
+  }
+
+  // Clear empty note if we have items
+  if (hasNew && logList.querySelector('.empty-note')) {
+    logList.querySelector('.empty-note').remove();
+  }
 }
 
 function updateSettings() {

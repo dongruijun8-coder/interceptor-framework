@@ -397,8 +397,14 @@ class BaseClient:
                 self._notify("error", f"房间 {room.get('name')} 失败: {e}")
 
         if self._running:
+            with self._lock:
+                self._progress["current_room_index"] = len(self._rooms)
+                self._progress["current_room_name"] = ""
+            self.state.save_progress(
+                current_room_index=len(self._rooms),
+                current_room_name="",
+            )
             self._notify("done", "全部房间完成")
-            self.state.reset_progress()
         self._running = False
 
     def run_room(self, room: dict, idx: int) -> None:
@@ -414,6 +420,8 @@ class BaseClient:
         try:
             users = self.fetch_room_ranking(room, self._period)
         except Exception as e:
+            with self._lock:
+                self._ranking_users = []
             self._notify("error", f"排行失败 {room.get('name')}: {e}")
             return
 
@@ -426,6 +434,18 @@ class BaseClient:
         # Store ranking users with initial status for frontend display
         with self._lock:
             self._ranking_users = [dict(u, status="wait") for u in users]
+
+        # Batch-mark already-sent users so UI shows "sent" not "wait"
+        skip_uids = set()
+        for user in users:
+            uid = str(user.get("uid", ""))
+            if uid and self.state.is_sent_today(uid):
+                skip_uids.add(uid)
+        if skip_uids:
+            with self._lock:
+                for ru in self._ranking_users:
+                    if str(ru.get("uid")) in skip_uids:
+                        ru["status"] = "sent"
 
         for user in users:
             if not self._wait_if_paused():
@@ -441,6 +461,7 @@ class BaseClient:
             text = template.replace("{nick}", nick).replace("{room_name}", room.get("name", ""))
 
             # 记录当前正在发的用户 + 标记排行榜状态
+            send_start = time.time()
             with self._lock:
                 self._current_user = {"uid": uid, "nick": nick, "text": text,
                                        "room": room.get("name", ""),
@@ -449,6 +470,9 @@ class BaseClient:
                     if str(ru.get("uid")) == str(uid):
                         ru["status"] = "sending"
                         break
+
+            # 短暂延迟让前端轮询捕获"sending"状态（前端3秒轮询，太快完成会跳过）
+            time.sleep(0.6)
 
             try:
                 result = self.send_message(uid, text)
@@ -531,6 +555,7 @@ class BaseClient:
     def reset_progress(self) -> None:
         with self._lock:
             self._progress = {}
+            self._rooms = []
             self.state.reset_progress()
 
     def set_frida_session(self, session) -> None:
@@ -561,6 +586,7 @@ class BaseClient:
             current_user = dict(self._current_user)
             recent_sent = list(self._recent_sent)
             recent_failed = list(self._recent_failed)
+            ranking_users = [dict(ru) for ru in self._ranking_users]
         total_rooms = len(rooms)
         current_idx = progress.get("current_room_index", 0)
         return {
@@ -584,7 +610,10 @@ class BaseClient:
             "available_periods": self._periods,
             "available_genders": self._genders,
             "templates": list(self._templates),
-            "ranking_users": [dict(ru) for ru in self._ranking_users],
+            "ranking_users": ranking_users,
+            "sent_today_total": len(sent_today_data := self.state.load_sent_today().get("sent", [])),
+            "rooms_today_total": len(set(s.get("room", "") for s in sent_today_data if s.get("room"))),
+            "sent_today_data": sent_today_data,  # avoid double read
         }
 
     def _notify(self, event: str, payload) -> None:

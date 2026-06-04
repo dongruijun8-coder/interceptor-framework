@@ -14,6 +14,7 @@ class StateManager:
         self._rooms_path = self.state_dir / "rooms_cache.json"
         self._sent_path = self.state_dir / "sent_today.json"
         self._progress_path = self.state_dir / "progress.json"
+        self._sent_today_cache: dict | None = None  # 内存缓存，避免重复读盘
 
     def _read_json(self, path: Path, default):
         try:
@@ -51,14 +52,19 @@ class StateManager:
             data["sent"] = []
         return data
 
+    def _get_sent_today_cache(self) -> dict:
+        if self._sent_today_cache is None:
+            self._sent_today_cache = self.load_sent_today()
+        return self._sent_today_cache
+
     def is_sent_today(self, uid: str) -> bool:
         uid = str(uid)
-        data = self.load_sent_today()
+        data = self._get_sent_today_cache()
         return any(s["uid"] == uid for s in data["sent"])
 
     def mark_sent(self, uid: str, nick: str, room_name: str) -> None:
         uid = str(uid)
-        data = self.load_sent_today()
+        data = self._get_sent_today_cache()
         data["sent"].append({
             "uid": uid, "nick": nick, "room": room_name,
             "time": datetime.now().strftime("%H:%M"),
