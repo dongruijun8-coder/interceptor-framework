@@ -23,7 +23,9 @@ class FridaSession:
         self._device: Optional[frida.core.Device] = None
         self._session: Optional[frida.core.Session] = None
         self._script: Optional[frida.core.Script] = None
+        self._script_second: Optional[frida.core.Script] = None  # WS hook / extra scripts
         self._rpc = None
+        self._rpc_second = None  # RPC for second script
         self._lock = threading.Lock()
         self._connected = False
 
@@ -149,6 +151,43 @@ class FridaSession:
             self._rpc = self._script.exports_sync
             self._connected = True
 
+    def load_script(self, script_path: str) -> None:
+        """加载第二个 Frida 脚本到同一 session（如 WS hook 等辅助脚本）。
+
+        不替换主脚本，通过 _rpc_second 访问 exports。
+        """
+        with self._lock:
+            if not self._connected or not self._session:
+                raise RuntimeError("Frida 会话未连接，无法加载脚本")
+
+            # 如果同路径已加载，跳过
+            if self._script_second is not None:
+                return
+
+            js_code = Path(script_path).read_text(encoding="utf-8")
+            try:
+                self._script_second = self._session.create_script(js_code)
+            except frida.InvalidOperationError as e:
+                raise RuntimeError(f"Frida 脚本语法错误: {e}")
+
+            self._script_second.load()
+
+            # Wait for exports to populate
+            import time as _time
+            for i in range(20):
+                _time.sleep(0.5)
+                try:
+                    if (hasattr(self._script_second, 'exports')
+                            and self._script_second.exports is not None):
+                        export_keys = [k for k in dir(self._script_second.exports)
+                                       if not k.startswith('_')]
+                        if len(export_keys) > 0:
+                            break
+                except Exception:
+                    pass
+
+            self._rpc_second = self._script_second.exports_sync
+
     def send_message(self, uid: str, text: str) -> dict:
         """Call rpc.exports.sendMessage/sendText(uid, text) in the injected script.
 
@@ -255,21 +294,24 @@ class FridaSession:
         return {"success": False, "error": f"poll timeout ({timeout}s) for key={key}"}
 
     def disconnect(self) -> None:
-        """Clean up: unload script, detach session"""
+        """Clean up: unload scripts, detach session"""
         with self._lock:
             self._connected = False
             self._rpc = None
-            try:
-                if self._script:
-                    self._script.unload()
-            except Exception:
-                pass
+            self._rpc_second = None
+            for s in [self._script, self._script_second]:
+                try:
+                    if s:
+                        s.unload()
+                except Exception:
+                    pass
             try:
                 if self._session:
                     self._session.detach()
             except Exception:
                 pass
             self._script = None
+            self._script_second = None
             self._session = None
             self._device = None
 

@@ -1,0 +1,36 @@
+{
+  "credentials": {
+    "token": "",
+    "uid": 0
+  },
+  "settings": {
+    "send_interval": 5
+  },
+  "data_sources": {
+    "贡献榜": "2001",
+    "守护榜": "2002",
+    "贵族榜": "2003",
+    "魅力榜": "2004"
+  },
+  "periods": {
+    "日榜": "day",
+    "周榜": "week",
+    "总榜": "total"
+  },
+  "genders": {
+    "全部": null,
+    "女": 0,
+    "男": 1,
+    "其他": 2
+  },
+  "templates": [
+    "{nick} 你好~",
+    "{nick} 在吗？"
+  ],
+  "device": {
+    "serial": "127.0.0.1:7555",
+    "app_package": "com.pico.live",
+    "script_name": "hook_send_msg.js",
+    "device_id": ""
+  }
+}

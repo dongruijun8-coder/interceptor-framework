@@ -98,6 +98,9 @@ class BaseClient:
 
     def fetch_all_rooms(self) -> list:
         ep = self.config["endpoints"]["all_rooms"]
+        # WebSocket transport — use Frida RPC bridge
+        if ep.get("transport") == "ws":
+            return self._fetch_rooms_ws(ep)
         if "steps" in ep:
             return self._execute_steps(ep)
         else:
@@ -106,6 +109,98 @@ class BaseClient:
             if mapping:
                 rooms = [self._map_fields(r, mapping) for r in rooms]
             return rooms
+
+    def _fetch_rooms_ws(self, ep: dict) -> list:
+        """通过 Frida RPC 从 WebSocket 连接获取房间列表。
+
+        流程：
+        1. 注入 WS hook 脚本（hook_ws_rooms.js）到已连接的 Frida session
+        2. 脚本 hook OkHttp WebSocket，拦截/缓存房间数据
+        3. 通过 RPC getRooms() 获取缓存结果
+        4. 应用 output_mapping 返回统一格式
+        """
+        ws_cfg = ep.get("ws", {})
+        method = ws_cfg.get("method", "getRooms")
+        script_name = ws_cfg.get("script", "hook_ws_rooms.js")
+
+        # Auto-connect Frida if not already connected
+        if not self._frida_session or not self._frida_session.is_connected:
+            rt = self._load_runtime()
+            device = rt.get("device", {})
+            serial = device.get("serial", "")
+            package = device.get("app_package", self.config.get("meta", {}).get("package", ""))
+            if not serial or not package:
+                raise RuntimeError(
+                    "WS 房间列表需要 Frida 连接，但未配置设备。请在 Dashboard 设置设备串号")
+            # Auto-connect: use IM script as main, WS hook loaded as second
+            main_script = str(self.config_path.parent / device.get("script_name", "hook_send_msg.js"))
+            if not Path(main_script).exists():
+                main_script = str(self.config_path.parent / "hook_send_msg.js")
+            from framework.bridge.frida_session import FridaSessionManager
+            try:
+                self._frida_session = FridaSessionManager().get_or_create(
+                    self.app_name, serial, package, main_script)
+            except Exception as e:
+                raise RuntimeError(f"Frida 连接失败: {e}")
+
+        # Load the WS hook script into the same Frida session
+        script_path = self.config_path.parent / script_name
+        if not script_path.exists():
+            alt = Path("apps") / self.app_name / script_name
+            if alt.exists():
+                script_path = alt
+        if not script_path.exists():
+            raise RuntimeError(f"WS 房间脚本不存在: {script_name}")
+
+        try:
+            self._frida_session.load_script(str(script_path))
+        except Exception as e:
+            raise RuntimeError(f"WS 脚本注入失败: {e}")
+
+        # 通知前端等待
+        self._notify("info", "WebSocket 房间扫描中... 请在 App 中进入房间列表页面")
+
+        # 轮询获取房间数据（需要用户在 App 中浏览房间以触发 WS 推送）
+        deadline = time.time() + 30  # 最多等 30 秒
+        while time.time() < deadline:
+            # 检查暂停/停止
+            if not self._running:
+                return []
+            try:
+                rpc = self._frida_session._rpc_second or self._frida_session._rpc
+                raw = getattr(rpc, method)()
+                if isinstance(raw, str):
+                    import json as _json
+                    raw = _json.loads(raw)
+                if isinstance(raw, list) and len(raw) > 0:
+                    mapping = ep.get("output_mapping", {})
+                    if mapping:
+                        return [self._map_fields(r, mapping) for r in raw]
+                    return raw
+            except Exception:
+                pass
+            time.sleep(1.0)
+
+        # Timeout — 返回已缓存的数据
+        try:
+            rpc = self._frida_session._rpc_second or self._frida_session._rpc
+            raw = getattr(rpc, method)()
+            if isinstance(raw, str):
+                import json as _json
+                raw = _json.loads(raw)
+            if isinstance(raw, list) and len(raw) > 0:
+                mapping = ep.get("output_mapping", {})
+                if mapping:
+                    return [self._map_fields(r, mapping) for r in raw]
+                return raw
+        except Exception:
+            pass
+
+        raise RuntimeError(
+            f"WS 房间扫描超时（30s）。请确认："
+            f"1) App 已打开并进入房间列表页面 "
+            f"2) WS hook 脚本已正确配置"
+        )
 
     def _execute_steps(self, ep: dict) -> list:
         all_rooms = []
@@ -301,6 +396,25 @@ class BaseClient:
 
     # ═══ Template ═══
 
+    def _identity_vars(self) -> dict:
+        """运行时身份变量，所有请求 body 自动注入"""
+        import time as _time
+        rt = self._load_runtime()
+        device = rt.get("device", {})
+        profile = rt.get("profile", {})
+        did = device.get("device_id",
+                self.config.get("server", {}).get("default_headers", {}).get("device-id", ""))
+        return {
+            "uid": self._uid,
+            "token": self._auth_token,
+            "device_id": did,
+            "shumei_device_id": device.get("shumei_device_id", did),
+            "h5_ts": str(int(_time.time() * 1000)),
+            "timestamp_ms": str(int(_time.time() * 1000)),
+            "age": str(profile.get("age", "25")),
+            "gender": str(profile.get("gender", "1")),
+        }
+
     def _fill_template(self, template, **kwargs) -> dict:
         result = {}
         for key, value in template.items():
@@ -308,11 +422,16 @@ class BaseClient:
                 def replacer(m):
                     var_path = m.group(1)
                     parts = var_path.split(".", 1)
+                    # 1. Check kwargs (room, _iter, etc.)
                     if parts[0] in kwargs:
                         obj = kwargs[parts[0]]
                         if len(parts) > 1 and isinstance(obj, dict):
                             return str(obj.get(parts[1], ""))
                         return str(obj)
+                    # 2. Check identity vars
+                    ident = self._identity_vars()
+                    if var_path in ident:
+                        return str(ident[var_path])
                     return m.group(0)
                 result[key] = re.sub(r'\{\{(.+?)\}\}', replacer, value)
             elif isinstance(value, dict):
@@ -614,6 +733,9 @@ class BaseClient:
             "sent_today_total": len(sent_today_data := self.state.load_sent_today().get("sent", [])),
             "rooms_today_total": len(set(s.get("room", "") for s in sent_today_data if s.get("room"))),
             "sent_today_data": sent_today_data,  # avoid double read
+            "credentials": (rt := self._load_runtime()).get("credentials", {}),
+            "profile": rt.get("profile", {}),
+            "device": rt.get("device", {}),
         }
 
     def _notify(self, event: str, payload) -> None:

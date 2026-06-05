@@ -6,6 +6,7 @@ from .encryption.aes_cbc import AesCbcEncryption
 from .signing.plaintext import PlaintextSigning
 from .signing.xor_triple import XorTripleSigning
 from .signing.sha1_sorted_kv import Sha1SortedKvSigning
+from .signing.md5_h5_sign import Md5H5Signing
 from .auth.manual_token import ManualTokenAuth
 from .auth.password_login import PasswordLoginAuth
 from .auth.sms_login import SmsLoginAuth
@@ -22,6 +23,7 @@ ProcessorRegistry.register(AesCbcEncryption)
 ProcessorRegistry.register(PlaintextSigning)
 ProcessorRegistry.register(XorTripleSigning)
 ProcessorRegistry.register(Sha1SortedKvSigning)
+ProcessorRegistry.register(Md5H5Signing)
 ProcessorRegistry.register(ManualTokenAuth)
 ProcessorRegistry.register(PasswordLoginAuth)
 ProcessorRegistry.register(SmsLoginAuth)

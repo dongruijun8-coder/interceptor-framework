@@ -158,6 +158,11 @@ def api_app_settings(app_id):
     if "gender" in data:
         runtime["gender"] = data["gender"]
         task._gender = data["gender"]
+    # Credentials & profile (token, uid, age, gender, device_id)
+    if "credentials" in data:
+        runtime["credentials"] = data["credentials"]
+    if "profile" in data:
+        runtime["profile"] = data["profile"]
 
     _atomic_write_json(runtime_path, runtime)
     return jsonify({"success": True})
@@ -456,11 +461,10 @@ def api_app_device_set(app_id):
     runtime = {}
     if runtime_path.exists():
         runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-    runtime["device"] = {
-        "serial": data.get("serial", ""),
-        "app_package": data.get("app_package", ""),
-        "script_name": data.get("script_name", "hook_send_msg.js"),
-    }
+    dev = runtime.setdefault("device", {})
+    for key in ["serial", "app_package", "script_name", "device_id", "shumei_device_id"]:
+        if key in data:
+            dev[key] = data[key]
     _atomic_write_json(runtime_path, runtime)
     return jsonify({"success": True})
 

@@ -207,8 +207,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 </div>
 
 <div class="modal-overlay hidden" id="settingsModal">
-<div class="modal">
+<div class="modal" style="max-width:480px;max-height:90vh;overflow-y:auto">
   <h3 id="settingsTitle">设置</h3>
+  <label>Token</label><input type="text" id="setToken" placeholder="access token">
+  <label>UID</label><input type="text" id="setUid" placeholder="用户 UID">
+  <label>设备 ID</label><input type="text" id="setDeviceId" placeholder="device_id / android_id">
+  <label>数美设备 ID</label><input type="text" id="setShumeiDid" placeholder="shumei_device_id（可选）">
   <label>发信间隔（秒）</label><input type="number" id="setInterval" value="3" min="1" max="60">
   <label>话术模板（一行一条）</label>
   <textarea id="setTemplates" style="height:80px"></textarea>
@@ -501,6 +505,12 @@ function scanRooms() {
 }
 function openSettings() {
   var modal = document.getElementById('settingsModal');
+  var cred = appData.credentials || {};
+  var dev = appData.device || {};
+  document.getElementById('setToken').value = cred.token || '';
+  document.getElementById('setUid').value = cred.uid || '';
+  document.getElementById('setDeviceId').value = dev.device_id || '';
+  document.getElementById('setShumeiDid').value = dev.shumei_device_id || '';
   document.getElementById('setInterval').value = appData.interval || 3;
   document.getElementById('setTemplates').value = (appData.templates || ['{nick} 你好~']).join('\n');
   modal.classList.remove('hidden');
@@ -509,7 +519,24 @@ function closeSettings() { document.getElementById('settingsModal').classList.ad
 function saveSettings() {
   var templates = document.getElementById('setTemplates').value.split('\n').filter(function(l) { return l.trim(); });
   var interval = parseInt(document.getElementById('setInterval').value) || 5;
-  var body = { templates: templates, send_interval: interval };
+  var body = {
+    templates: templates,
+    send_interval: interval,
+    credentials: {
+      token: document.getElementById('setToken').value.trim(),
+      uid: parseInt(document.getElementById('setUid').value) || 0
+    }
+  };
+  // Also save device_id via device endpoint
+  var did = document.getElementById('setDeviceId').value.trim();
+  if (did) {
+    fetch('/api/app/' + encodeURIComponent(APP_ID) + '/device', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: did,
+        shumei_device_id: document.getElementById('setShumeiDid').value.trim() })
+    });
+  }
   fetch('/api/app/' + encodeURIComponent(APP_ID) + '/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
