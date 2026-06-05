@@ -136,6 +136,18 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .modal input:focus,.modal textarea:focus{outline:none;border-color:var(--accent)}
 .modal textarea{resize:vertical}
 .modal .btn-row{display:flex;gap:8px;margin-top:22px;justify-content:flex-end}
+#credsList h4{font-size:12px;color:var(--accent);margin:14px 0 6px;text-transform:uppercase;letter-spacing:.5px}
+.cred-row{display:flex;gap:10px;padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;word-break:break-all}
+.cred-row:hover{background:var(--surface)}
+.cred-key{color:var(--text-muted);min-width:100px;max-width:140px;flex-shrink:0;font-weight:500}
+.cred-val{color:var(--text);font-family:ui-monospace,'SF Mono',monospace;font-size:11px}
+.cred-card{border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px}
+.cred-item{display:flex;align-items:flex-start;padding:10px 14px;border-bottom:1px solid var(--border);gap:12px}
+.cred-item:last-child{border-bottom:none}
+.cred-label{font-size:11px;color:var(--text-muted);min-width:64px;flex-shrink:0;font-weight:500;text-transform:uppercase;letter-spacing:.5px;padding-top:2px}
+.cred-value{font-size:12px;font-family:ui-monospace,'SF Mono',monospace;word-break:break-all;line-height:1.4}
+.cred-toggle{font-size:12px;color:var(--accent);cursor:pointer;margin-top:4px;user-select:none}
+.cred-toggle:hover{text-decoration:underline}
 
 .panel::-webkit-scrollbar{width:4px}
 .panel::-webkit-scrollbar-track{background:transparent}
@@ -160,6 +172,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
     <div class="btn btn-danger btn-xs hidden" id="btnStop" onclick="stopTask()">停止</div>
     <div class="btn btn-ghost btn-xs" onclick="scanRooms()">扫描房间</div>
     <div class="btn btn-ghost btn-xs" onclick="openSettings()">设置</div>
+    <div class="btn btn-ghost btn-xs" onclick="extractCreds()" id="btnExtract" style="margin-left:4px">🔑 提取凭证</div>
   </div>
 </header>
 
@@ -205,6 +218,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
     <div id="logList"><div class="empty-note">等待任务启动...</div></div>
   </div>
 </div>
+
+<!-- Creds Result Modal -->
+<div class="modal-overlay hidden" id="credsModal" onclick="if(event.target===this)closeCreds()">
+<div class="modal" style="max-width:440px;max-height:80vh;overflow-y:auto">
+  <h3>凭证提取</h3>
+  <div id="credsList" style="font-size:13px"></div>
+  <div class="btn-row"><div class="btn btn-ghost" onclick="closeCreds()">关闭</div></div>
+</div></div>
 
 <div class="modal-overlay hidden" id="settingsModal">
 <div class="modal" style="max-width:480px;max-height:90vh;overflow-y:auto">
@@ -559,7 +580,55 @@ function onSettingChange() {
   });
 }
 document.getElementById('settingsModal').addEventListener('click', function(e) { if (e.target === this) closeSettings(); });
-document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeSettings(); });
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { closeSettings(); closeCreds(); } });
+
+function extractCreds() {
+  var btn = document.getElementById('btnExtract');
+  btn.textContent = '提取中...';
+  btn.disabled = true;
+  fetch('/api/app/' + encodeURIComponent(APP_ID) + '/extract-creds', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    btn.textContent = '🔑 提取凭证';
+    btn.disabled = false;
+    if (d.success && d.saved) {
+      var parts = [];
+      if (d.saved.token) parts.push('token ✓');
+      if (d.saved.uid) parts.push('uid ✓');
+      if (d.saved.device_id) parts.push('device_id ✓');
+      showCredsResult(d, parts.length ? '已自动配置: ' + parts.join(', ') : d.saved.message);
+    } else {
+      showCredsResult(d, '提取失败: ' + (d.error || 'unknown'));
+    }
+  }).catch(function() {
+    btn.textContent = '🔑 提取凭证';
+    btn.disabled = false;
+  });
+}
+
+function showCredsResult(d, summary) {
+  var s = d.saved || {};
+  var html = '<p style="font-weight:600;margin-bottom:16px">' + esc(s._message || summary) + '</p>';
+
+  // 卡片：只显示已保存的凭证
+  html += '<div class="cred-card">';
+  if (s.token)  html += '<div class="cred-item"><span class="cred-label">Token</span><span class="cred-value">' + esc(s.token) + '</span></div>';
+  if (s.uid)    html += '<div class="cred-item"><span class="cred-label">UID</span><span class="cred-value">' + esc(s.uid) + '</span></div>';
+  if (s.device_id) html += '<div class="cred-item"><span class="cred-label">Device ID</span><span class="cred-value">' + esc(s.device_id) + '</span></div>';
+  html += '</div>';
+
+  // 原始数据折叠
+  html += '<div class="cred-toggle" onclick="var e=document.getElementById(\'credsRaw\');var t=this;if(e.classList.contains(\'hidden\')){e.classList.remove(\'hidden\');t.textContent=\'▲ 收起原始数据\'}else{e.classList.add(\'hidden\');t.textContent=\'▼ 查看原始数据\'}">▼ 查看原始数据</div>';
+  html += '<pre id="credsRaw" class="hidden" style="max-height:200px;overflow:auto;font-size:11px;margin-top:8px;background:var(--surface);padding:10px;border-radius:8px;white-space:pre-wrap;word-break:break-all">' + esc(JSON.stringify(d.raw || {}, null, 2)) + '</pre>';
+
+  document.getElementById('credsList').innerHTML = html;
+  document.getElementById('credsModal').classList.remove('hidden');
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function closeCreds() { document.getElementById('credsModal').classList.add('hidden'); }
 </script>
 </body>
 </html>

@@ -469,6 +469,326 @@ def api_app_device_set(app_id):
     return jsonify({"success": True})
 
 
+@app.route("/api/app/<app_id>/extract-creds", methods=["POST"])
+def api_app_extract_creds(app_id):
+    """从 App 提取凭据：adb 读 SharedPreferences + Frida 抓 OkHttp headers。
+
+    提取后自动保存 token/uid/device_id 到 runtime.json，更新运行中 task。
+    """
+    task = manager.get_task(app_id)
+    if not task:
+        return jsonify({"error": "not found"}), 404
+
+    runtime_path = APPS_DIR / app_id / "runtime.json"
+    runtime = {}
+    if runtime_path.exists():
+        runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+
+    device = runtime.get("device", {})
+    config_path = APPS_DIR / app_id / "config.json"
+    config = {}
+    if config_path.exists():
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+
+    serial = device.get("serial", "")
+    req_data = request.get_json() or {}
+    if req_data.get("serial"):
+        serial = req_data["serial"]
+    package = device.get("app_package") or config.get("meta", {}).get("package", "")
+
+    if not serial or not package:
+        return jsonify({"success": False, "error": "请先设置设备串号和包名"}), 400
+
+    import subprocess
+    import re
+    import xml.etree.ElementTree as ET
+
+    all_entries = {}   # filename → {key: value}
+    http_headers = {}
+    device_info = {}
+
+    # ═══ Phase 1: adb read SharedPreferences XML ═══
+    sp_dir = f"/data/data/{package}/shared_prefs"
+
+    xml_files = []
+    # Try su first (MuMu/rooted), fallback to direct.
+    # Use single string after "shell" for proper quoting
+    for ls_cmd in (f"su -c 'ls {sp_dir}'", f"ls {sp_dir}"):
+        try:
+            r = subprocess.run(
+                ["adb", "-s", serial, "shell", ls_cmd],
+                capture_output=True, text=True, timeout=10,
+                encoding='utf-8', errors='replace',
+            )
+            lines = [f.strip() for f in r.stdout.split("\n") if f.strip().endswith(".xml")]
+            if lines:
+                xml_files = lines
+                break
+        except Exception:
+            continue
+
+    # Read each XML file (try su first, fallback direct)
+    for fname in xml_files:
+        fpath = f"{sp_dir}/{fname}"
+        content = None
+        for cat_cmd in (f"su -c 'cat {fpath}'", f"cat {fpath}"):
+            try:
+                r = subprocess.run(
+                    ["adb", "-s", serial, "shell", cat_cmd],
+                    capture_output=True, text=True, timeout=10,
+                    encoding='utf-8', errors='replace',
+                )
+                if r.returncode == 0 and r.stdout.strip():
+                    content = r.stdout
+                    break
+            except Exception:
+                continue
+        if not content:
+            continue
+
+        entries = {}
+        try:
+            root = ET.fromstring(content)
+            for el in root:
+                key = el.get("name", "")
+                if el.tag == "string":
+                    entries[key] = el.text or ""
+                elif el.tag in ("int", "long", "boolean"):
+                    entries[key] = el.get("value", "")
+        except ET.ParseError:
+            for m in re.finditer(r'<string name="([^"]+)">([^<]*)</string>', content):
+                entries[m.group(1)] = m.group(2)
+            for m in re.finditer(r'<(int|boolean|long) name="([^"]+)" value="([^"]+)"', content):
+                entries[m.group(2)] = m.group(3)
+
+        if entries:
+            clean_name = fname.replace(".xml", "")
+            all_entries[clean_name] = entries
+
+    # ═══ Phase 2: Frida capture OkHttp headers (best-effort) ═══
+    try:
+        import frida
+        frida_result = {}
+
+        def _frida_capture():
+            nonlocal frida_result
+            session = None
+            script = None
+            try:
+                dm = frida.get_device_manager()
+                try:
+                    dev = dm.get_device(serial)
+                except Exception:
+                    try:
+                        dev = dm.get_usb_device()
+                    except Exception:
+                        return
+                try:
+                    session = dev.attach(package)
+                except frida.ProcessNotFoundError:
+                    for p in dev.enumerate_processes():
+                        if package.lower() in (p.name or "").lower():
+                            session = dev.attach(p.pid)
+                            break
+                    if not session:
+                        return
+
+                script_path = Path(__file__).resolve().parent.parent / "bridge" / "hook_extract_creds.js"
+                js_code = script_path.read_text(encoding="utf-8")
+                script = session.create_script(js_code)
+                script.load()
+
+                for i in range(6):
+                    import time as _t
+                    _t.sleep(0.5)
+                    try:
+                        if hasattr(script, 'exports') and script.exports is not None:
+                            keys = [k for k in dir(script.exports) if not k.startswith('_')]
+                            if 'getCredentials' in keys:
+                                raw = script.exports_sync.get_credentials()
+                                if isinstance(raw, str):
+                                    d = json.loads(raw)
+                                else:
+                                    d = raw
+                                frida_result = {
+                                    "headers": d.get("httpHeaders", {}),
+                                    "deviceInfo": d.get("deviceInfo", {}),
+                                }
+                                break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            finally:
+                try:
+                    if script:
+                        script.unload()
+                except Exception:
+                    pass
+                try:
+                    if session:
+                        session.detach()
+                except Exception:
+                    pass
+
+        import threading
+        t = threading.Thread(target=_frida_capture, daemon=True)
+        t.start()
+        t.join(timeout=8)
+        http_headers = frida_result.get("headers", {})
+        device_info = frida_result.get("deviceInfo", {})
+    except Exception:
+        pass
+
+    # ═══ Phase 3: adb device info (backup) ═══
+    if not device_info:
+        try:
+            r = subprocess.run(
+                ["adb", "-s", serial, "shell", "settings", "get", "secure", "android_id"],
+                capture_output=True, text=True, timeout=5,
+                encoding='utf-8', errors='replace',
+            )
+            aid = r.stdout.strip()
+            if aid and aid != "null":
+                device_info["android_id"] = aid
+        except Exception:
+            pass
+
+    # ═══ Auto-detect & save ═══
+    token = None
+    uid = None
+    device_id = None
+
+    token_patterns = ["access_token", "refresh_token", "auth_token", "tk"]
+    uid_patterns = ["uid", "user_id", "userid", "h_m", "member_id", "mid"]
+    did_patterns = ["device_id", "device-id", "did", "android_id", "key_did"]
+
+    for filename, entries in all_entries.items():
+        for key, value in entries.items():
+            key_lower = key.lower()
+            val = str(value).strip()
+
+            # Special: AccountData / account-like JSON blobs with tk+mid
+            if not token or not uid:
+                if val.startswith("{") and ("tk" in val or "mid" in val or "access_token" in val):
+                    try:
+                        nested = json.loads(val)
+                        if not token and "tk" in nested:
+                            token = str(nested["tk"])
+                        if not token and "access_token" in nested:
+                            token = str(nested["access_token"])
+                        if not uid and "mid" in nested:
+                            uid = str(nested["mid"])
+                        if not uid and "uid" in nested:
+                            uid = str(nested["uid"])
+                        if not uid and "user_id" in nested:
+                            uid = str(nested["user_id"])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+            if not token:
+                for p in token_patterns:
+                    if p in ("tk",):
+                        if (key_lower == p or key_lower.endswith(":" + p) or key_lower.endswith("_" + p)) and len(val) > 8:
+                            token = val
+                            break
+                    elif p in key_lower and len(val) > 8:
+                        token = val
+                        break
+                if not token and key_lower == "token" and len(val) > 12:
+                    token = val
+
+            if not uid:
+                for p in uid_patterns:
+                    # Short patterns need exact match or word boundary
+                    if p in ("h_m", "mid", "uid"):
+                        if key_lower == p or key_lower.endswith(":" + p) or key_lower.endswith("_" + p):
+                            try:
+                                int(val)
+                                uid = val
+                                break
+                            except ValueError:
+                                pass
+                    elif p in key_lower:
+                        try:
+                            int(val)
+                            uid = val
+                            break
+                        except ValueError:
+                            pass
+
+            if not device_id:
+                for p in did_patterns:
+                    if p in key_lower and len(val) >= 8:
+                        device_id = val
+                        break
+
+    # Check httpHeaders
+    for name, value in http_headers.items():
+        name_lower = name.lower()
+        val = str(value)
+        if not token and ("token" in name_lower or "auth" in name_lower):
+            if len(val) > 10:
+                token = val
+        if not uid and ("uid" in name_lower or "user" in name_lower):
+            try:
+                int(val)
+                uid = val
+            except ValueError:
+                pass
+
+    # Fallback: device_id from device_info
+    if not device_id and device_info.get("android_id"):
+        device_id = device_info["android_id"]
+
+    # Parse nested JSON in token values (e.g. refresh_token = {"access_token": "..."})
+    if token and token.startswith("{") and "access_token" in token:
+        try:
+            nested = json.loads(token)
+            if nested.get("access_token"):
+                token = nested["access_token"]
+            if not uid and nested.get("uid"):
+                uid = str(nested["uid"])
+            if not uid and nested.get("user_id"):
+                uid = str(nested["user_id"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    saved = {}
+    if not runtime_path.exists():
+        runtime = {}
+
+    if token:
+        runtime.setdefault("credentials", {})["token"] = token
+        task._auth_token = token
+        saved["token"] = token[:20] + "..."
+
+    if uid:
+        runtime.setdefault("credentials", {})["uid"] = int(uid)
+        task._uid = str(uid)
+        saved["uid"] = uid
+
+    if device_id:
+        runtime.setdefault("device", {})["device_id"] = device_id
+        saved["device_id"] = device_id
+
+    if saved:
+        _atomic_write_json(runtime_path, runtime)
+        saved["_message"] = f"已自动配置到 {app_id}"
+    else:
+        saved["_message"] = "未识别到 token/uid，请确认 App 已登录"
+
+    return jsonify({
+        "success": True,
+        "saved": saved,
+        "raw": {
+            "sharedPrefs": all_entries,
+            "httpHeaders": http_headers,
+            "deviceInfo": device_info,
+        },
+    })
+
+
 def run_dashboard(host: str = "127.0.0.1", port: int = 3112, debug: bool = False):
     app.run(host=host, port=port, debug=debug)
 
