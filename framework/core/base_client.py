@@ -276,7 +276,10 @@ class BaseClient:
             raise RuntimeError(f"encryption.encode failed: {e}")
 
         headers = dict(self._default_headers)
-        headers["Content-Type"] = "text/plain; charset=UTF-8"
+        # Only set Content-Type if not already provided (check case-insensitive)
+        ct_present = any(k.lower() == "content-type" for k in headers)
+        if not ct_present:
+            headers["Content-Type"] = "application/json; charset=utf-8"
         headers["__auth_token__"] = self._auth_token
 
         headers, extra_params = self._signer.sign(url, headers, body)
@@ -342,7 +345,7 @@ class BaseClient:
         base_url = self._base_url
 
         if base_body is None:
-            base_body = dict(ep.get("body", {}))
+            base_body = self._fill_template(dict(ep.get("body", {})))
 
         ptype = pagination.get("type") if pagination else None
 
@@ -387,12 +390,38 @@ class BaseClient:
                 if stop_on == "empty_list" and len(items) < size:
                     break
 
+        elif ptype == "cursor_offset":
+            # offset is a string cursor (empty for first page), next cursor from response
+            offset_field = pagination.get("offset_field", "offset")
+            offset_sent = pagination.get("offset_sent", "")  # path in response for next cursor
+            max_iters = pagination.get("max_iters", 30)
+            cursor = ""  # always start with empty string
+            for _ in range(max_iters):
+                body = dict(base_body)
+                body[offset_field] = cursor
+                resp = self._request(ep, body)
+                if not self.check_response(resp):
+                    break
+                items = self._extract_list(resp, ep)
+                if not items:
+                    break
+                results.extend(items)
+                if offset_sent:
+                    cursor = self._resolve_path(resp, offset_sent) or ""
+                else:
+                    cursor = ""
+                if not cursor:
+                    break
+                if stop_on == "empty_list" and len(items) < size:
+                    break
+
         else:
             # Unknown pagination type — single request
             resp = self._request(ep, base_body)
             if self.check_response(resp):
                 results = self._extract_list(resp, ep)
-            return results
+
+        return results
 
     # ═══ Template ═══
 
@@ -404,8 +433,14 @@ class BaseClient:
         profile = rt.get("profile", {})
         did = device.get("device_id",
                 self.config.get("server", {}).get("default_headers", {}).get("device-id", ""))
+        # uid as int (for APIs that need number), also available as uid_str
+        try:
+            uid_int = int(self._uid) if self._uid else 0
+        except (ValueError, TypeError):
+            uid_int = 0
         return {
-            "uid": self._uid,
+            "uid": uid_int,
+            "uid_str": str(self._uid) if self._uid else "",
             "token": self._auth_token,
             "device_id": did,
             "shumei_device_id": device.get("shumei_device_id", did),
@@ -419,16 +454,31 @@ class BaseClient:
         result = {}
         for key, value in template.items():
             if isinstance(value, str) and "{{" in value:
+                # Single {{var}} — preserve raw type (int, bool, etc.)
+                m = re.fullmatch(r'\{\{(.+?)\}\}', value.strip())
+                if m:
+                    var_path = m.group(1)
+                    parts = var_path.split(".", 1)
+                    if parts[0] in kwargs:
+                        obj = kwargs[parts[0]]
+                        if len(parts) > 1 and isinstance(obj, dict):
+                            result[key] = obj.get(parts[1], "")  # preserve type
+                        else:
+                            result[key] = obj
+                        continue
+                    ident = self._identity_vars()
+                    if var_path in ident:
+                        result[key] = ident[var_path]
+                        continue
+                # Multi-var or mixed text — string replacement
                 def replacer(m):
                     var_path = m.group(1)
                     parts = var_path.split(".", 1)
-                    # 1. Check kwargs (room, _iter, etc.)
                     if parts[0] in kwargs:
                         obj = kwargs[parts[0]]
                         if len(parts) > 1 and isinstance(obj, dict):
                             return str(obj.get(parts[1], ""))
                         return str(obj)
-                    # 2. Check identity vars
                     ident = self._identity_vars()
                     if var_path in ident:
                         return str(ident[var_path])
@@ -748,6 +798,10 @@ class BaseClient:
             return True
         status = resp_data.get("status")
         if status is not None and status == 0:
+            return True
+        # WeFun-style: ret=1
+        ret = resp_data.get("ret")
+        if ret is not None and int(ret) == 1:
             return True
         return False
 

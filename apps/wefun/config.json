@@ -3,7 +3,15 @@
     "app_name": "wefun",
     "package": "com.pico.live",
     "version": "11.2.6.2381",
-    "config_schema": "2.0"
+    "config_schema": "2.0",
+    "updated": "2026-06-06T19:00:00",
+    "status": {
+      "room_list": "verified",
+      "room_users": "verified",
+      "send_message": "verified",
+      "conversation_list": "verified",
+      "ranking": "restricted"
+    }
   },
   "server": {
     "base_url": "https://api.hiyaparty.com",
@@ -16,23 +24,12 @@
   },
   "pipeline": {
     "encryption": "plaintext",
-    "signing": {
-      "plugin": "md5-h5-sign",
-      "params": {
-        "secret": "a3f7e4c2b9d8a1e5f6c7d8e9a0b1c2d3",
-        "uid_field": "h_m",
-        "ts_field": "ts",
-        "sign_field": "h_sn",
-        "ts_ms_field": "h_ts",
-        "algorithm": "MD5",
-        "pattern": "{uid}{secret}{ts}"
-      }
-    },
+    "signing": "plaintext",
     "auth": {
       "plugin": "manual-token",
       "params": {
         "token_field": "token",
-        "uid_field": "h_m"
+        "uid_field": "uid"
       }
     },
     "messaging": {
@@ -42,105 +39,229 @@
         "send_method": "POST",
         "conv_list_path": "/api/app/im/v1/conversation_list/list",
         "conv_history_path": "/api/app/im/v1/conversation/history"
-      }
+      },
+      "_note": "IM endpoints use /api/ prefix (migrated 2026-06-06). Native auth (token in body). sign param in URL is NOT validated — can omit."
     }
   },
   "endpoints": {
     "all_rooms": {
-      "transport": "ws",
-      "ws": {
-        "script": "hook_ws_rooms.js",
-        "method": "getRooms"
-      },
-      "output_mapping": {
-        "id": "id",
-        "name": "name",
-        "cover": "cover",
-        "member_cnt": "member_cnt"
-      }
-    },
-    "ranking": {
-      "path": "/live/rank/common_rank",
+      "path": "/recommend_app/app/v1/roomlist",
       "method": "POST",
       "body": {
-        "h_dt": 0,
-        "h_os": "32",
-        "h_model": "emulator_other",
-        "h_did": "{{device_id}}",
-        "h_sys": "{{device_id}}",
-        "h_zone_offset": 28800,
-        "h_zone_name": "Asia/Shanghai",
-        "h_zone_abbreviation": "GMT+08:00",
-        "h_carrier": "insertedno",
-        "h_android_id": "{{device_id}}",
-        "h_proxy": true,
-        "h_vpn": false,
-        "h_sjgy": false,
-        "h_package": "com.pico.live",
-        "h_area_region": "CS",
-        "h_av": "11.2.6.2381",
-        "h_version_code": 101861,
-        "h_ch": "office",
-        "h_app": "me-live",
-        "h_language": "zh-CN",
-        "h_test": 0,
-        "h_appid": "68082pc",
+        "tab_id": 2,
+        "kind_id": 100002,
+        "offset": "",
+        "direction": "refresh",
         "h_m": "{{uid}}",
         "token": "{{token}}",
-        "h_age": "{{age}}",
-        "h_gender": "{{gender}}",
-        "h_region_code": 86,
-        "h_loc": {"h_lat": 0, "h_lon": 0, "city": "", "province": ""},
-        "room_id": "{{room.id}}",
-        "h_web_top": 3,
-        "mid": "{{uid}}",
-        "limit": 30,
-        "offset": "{{offset}}",
-        "rank_id": "{{data_source_key}}",
-        "h_lv": "11.0.0"
+        "h_did": "{{device_id}}",
+        "h_os": "32",
+        "h_av": "11.2.6.2381",
+        "h_app": "me-live",
+        "h_ch": "office",
+        "h_package": "com.pico.live"
       },
+      "response_path": "data.list",
       "pagination": {
-        "type": "offset_limit",
-        "size": 30,
+        "type": "cursor_offset",
+        "offset_field": "offset",
+        "offset_sent": "data.offset",
+        "size": 16,
         "stop_on": "empty_list"
       },
       "output_mapping": {
-        "uid": "info.member.MemberSt.id",
-        "nick": "info.member.MemberSt.name",
-        "avatar": "info.member.MemberSt.avatar",
-        "avatar_urls": "info.member.MemberSt.avatar_urls.aspect_low.urls[0]",
-        "gender": "info.member.MemberSt.gender",
-        "age": "info.member.MemberSt.age",
-        "amount": "score"
+        "id": "room_id",
+        "name": "title",
+        "cover": "cover"
+      }
+    },
+    "ranking": {
+      "path": "/room_v2/app/room/room_online_user",
+      "method": "POST",
+      "body": {
+        "room_id": "{{room.id}}",
+        "h_m": "{{uid}}",
+        "token": "{{token}}",
+        "h_did": "{{device_id}}",
+        "h_os": "32",
+        "h_av": "11.2.6.2381",
+        "h_app": "me-live",
+        "h_ch": "office",
+        "h_package": "com.pico.live"
+      },
+      "output_mapping": {
+        "uid": "mid",
+        "nick": "name"
+      }
+    },
+    "room_kinds": {
+      "_note": "Room category/tab configuration. Called once at app start.",
+      "path": "/room_v2/app/room/kind/list",
+      "method": "POST",
+      "body": {},
+      "query_params": {},
+      "output_mapping": {
+        "kind_id": "kind_id",
+        "kind_name": "kind_name",
+        "sub_kinds": "sub_kinds"
+      }
+    },
+    "ranking": {
+      "path": "/room_v2/app/room/room_online_user",
+      "method": "POST",
+      "body": {
+        "room_id": "{{room.id}}",
+        "h_m": "{{uid}}",
+        "token": "{{token}}",
+        "h_did": "{{device_id}}",
+        "h_os": "32",
+        "h_av": "11.2.6.2381",
+        "h_app": "me-live",
+        "h_ch": "office",
+        "h_package": "com.pico.live"
+      },
+      "response_path": "data.list",
+      "output_mapping": {
+        "uid": "mid",
+        "nick": "name",
+        "gender": null
+      }
+    },
+    "ranking_rich": {
+      "_note": "首页榜单 - 待补充端点路径",
+      "_status": "todo"
+    },
+    "send_message": {
+      "_verified": true,
+      "_note": "Send private message. API migrated to /api/ prefix + new nested body format (2026-06-06). sign in query string NOT validated — omit. conv_id = single_chat-{min}-{max}.",
+      "_format_sniffed_from": "mitmproxy capture of app v11.2.6.2381",
+      "path": "/api/app/im/v1/conversation/send",
+      "method": "POST",
+      "body": {
+        "spec_conv": {
+          "conv_type": "single_chat",
+          "spec_conv_id": "{{to_uid}}"
+        },
+        "msg": {
+          "content_type": "text",
+          "content": {"text": "{{message}}"},
+          "interact_type": "user_msg",
+          "client_msg_id": "{{uuid_v4}}",
+          "ct_millis": "{{ts_ms}}",
+          "from_user_id": "{{uid_string}}",
+          "to_user_id": "{{to_uid_string}}",
+          "conv_type": "single_chat",
+          "page_from": "we_msg_page",
+          "room_id": 0,
+          "conv_id": "{{conv_id}}",
+          "biz_type": "chat"
+        },
+        "h_m": "{{uid}}",
+        "h_did": "{{device_id}}",
+        "h_ts": "{{ts_ms}}",
+        "token": "{{token}}",
+        "base_params": {
+          "product_name": "w_project",
+          "app_type": "android",
+          "package_name": "com.pico.live",
+          "version_name": "11.2.6.2381",
+          "version_code": 101861,
+          "channel": "office",
+          "device_language": "zh",
+          "user_id": "{{uid}}",
+          "device_id": "{{device_id}}",
+          "app_id": "68082pc"
+        }
+      },
+      "query_params": {
+        "sign": "{{sign_md5_optional}}",
+        "_note": "sign parameter appears in app requests but not validated by server. Can be omitted."
+      }
+    },
+    "conversation_list": {
+      "_verified": true,
+      "_note": "List existing conversations. API migrated to /api/ prefix (2026-06-06). Fallback user discovery.",
+      "path": "/api/app/im/v1/conversation_list/list",
+      "method": "POST",
+      "body": {
+        "display_group": "normal",
+        "size": 50,
+        "cursor": "",
+        "h_m": "{{uid}}",
+        "h_did": "{{device_id}}",
+        "h_ts": "{{ts_ms}}",
+        "token": "{{token}}",
+        "base_params": {
+          "product_name": "w_project",
+          "app_type": "android",
+          "package_name": "com.pico.live",
+          "version_name": "11.2.6.2381",
+          "version_code": 101861,
+          "channel": "office",
+          "device_language": "zh",
+          "user_id": "{{uid}}",
+          "device_id": "{{device_id}}",
+          "app_id": "68082pc"
+        }
+      },
+      "query_params": {
+        "sign": "{{sign_md5_optional}}",
+        "_note": "Not validated. Can omit."
+      },
+      "output_mapping": {
+        "uid": "spec_conv_id",
+        "conv_id": "conv_id",
+        "last_msg": "last_msg.content",
+        "last_time": "last_msg_time_mills"
+      }
+    },
+    "conversation_history": {
+      "_note": "Message history with a user. API migrated to /api/ prefix (2026-06-06).",
+      "path": "/api/app/im/v1/conversation/history",
+      "method": "POST",
+      "body": {
+        "h_m": "{{uid}}",
+        "token": "{{token}}",
+        "conv_id": "{{conv_id}}",
+        "conv_type": "single_chat",
+        "limit": 20,
+        "offset": "{{offset}}"
+      },
+      "query_params": {
+        "sign": "{{sign_md5_optional}}",
+        "_note": "Not validated. Can omit."
       }
     }
   },
   "runtime_config": {
     "settings": { "send_interval": 5 },
     "data_sources": {
-      "贡献榜": "2001",
-      "守护榜": "2002",
-      "贵族榜": "2003",
-      "魅力榜": "2004"
+      "在线用户": "online"
     },
     "periods": {
-      "日榜": "day",
-      "周榜": "week",
-      "总榜": "total"
+      "全部": "all"
     },
     "genders": {
       "全部": null,
       "女": 0,
-      "男": 1,
-      "其他": 2
+      "男": 1
     },
     "templates": ["{nick} 你好~", "{nick} 在吗？"]
   },
   "_network": {
-    "native_http": "api.hiyaparty.com — IM (conversation list/history/send/read)",
-    "h5_http": "api.hiyaparty.com — H5 API (ranking, account, pay, noble, stat)",
-    "ws_live": "ws-api.hiyaparty.com/ws — room events (enter, members, gifts)",
-    "ws_im_push": "ws-api.hiyaparty.com/app/rtm_connector/v1/connect — IM push",
-    "h5_ssr": "m.hiyaparty.com — Next.js SSR"
+    "native_http": "api.hiyaparty.com — room list, room users. Auth: token in body, NO sign.",
+    "im_http": "api.hiyaparty.com/api/* — IM (conversation send/list/history). Auth: token in body. sign in query NOT validated.",
+    "h5_http": "api.hiyaparty.com — ranking, account, pay, noble, stat. Auth: h_sn=MD5(h_m+secret+ts) in query+body.",
+    "ws_live": "ws-api.hiyaparty.com/ws — room events (enter type:900, member type:801). Auth: sign=MD5(uid+secret+ts) in query.",
+    "ws_im_push": "ws-api.hiyaparty.com/app/rtm_connector/v1/connect — IM push. sign static per session.",
+    "h5_ssr": "m.hiyaparty.com — Next.js SSR",
+    "_migration_note": "IM endpoints moved from /app/im/* to /api/app/im/* circa 2026-06-06. Old paths return 404. Body format changed from flat to nested (spec_conv/msg/base_params)."
+  },
+  "_closed_loop": {
+    "step1": "POST /recommend_app/app/v1/roomlist — pick room_id",
+    "step2": "POST /room_v2/app/room/room_online_user — pick user mid",
+    "step3": "POST /api/app/im/v1/conversation/send — conv_id = single_chat-{min}-{max}",
+    "status": "all 3 endpoints verified 2026-06-06 19:00",
+    "_note": "Script: output/closed_loop_test.py (NO_PROXY=* python output/closed_loop_test.py)"
   }
 }

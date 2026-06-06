@@ -1,36 +1,36 @@
 {
   "credentials": {
-    "token": "",
-    "uid": 0
+    "token": "T2K2N5CQJgSjTSCFlPDEsWTUBgnItXq4_bWxAyaIIitBtJjo0DBopP7ccfuA7wtBZzBjr",
+    "uid": 302207594
   },
   "settings": {
     "send_interval": 5
   },
   "data_sources": {
-    "贡献榜": "2001",
-    "守护榜": "2002",
-    "贵族榜": "2003",
-    "魅力榜": "2004"
+    "在线用户": "online"
   },
   "periods": {
-    "日榜": "day",
-    "周榜": "week",
-    "总榜": "total"
+    "全部": "all"
   },
   "genders": {
     "全部": null,
     "女": 0,
-    "男": 1,
-    "其他": 2
+    "男": 1
   },
   "templates": [
-    "{nick} 你好~",
-    "{nick} 在吗？"
+    "想跟你说点悄悄话，只说给你一个人听。",
+    "私下里的我，可比你想象中稍多了",
+    "想不想知道，我私下里是什么样子。",
+    "敢不敢跟我玩点次级的，只属于我们俩。",
+    "别忍了，我知道你想要什么"
   ],
   "device": {
     "serial": "127.0.0.1:7555",
     "app_package": "com.pico.live",
     "script_name": "hook_send_msg.js",
-    "device_id": ""
-  }
+    "device_id": "nKoXQOVx1z9A5TK5+dYsSy2kIObjnYXU"
+  },
+  "data_source": "在线用户",
+  "period": "全部",
+  "gender": "全部"
 }
