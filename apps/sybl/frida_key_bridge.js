@@ -1,6 +1,6 @@
 // frida_key_bridge.js — SYBL Session Key + Auth + Messaging RPC
 // Target: com.sybl.voiceroom  |  Packer: NIS (hluda required)
-// Safe hooks only — NO reflection, NO enumeration, NO Java.cast
+// Hooks: SecretKeySpec.$init, IvParameterSpec, OkHttp headers
 
 var sessionKey = null;
 var sessionIV = null;
@@ -8,35 +8,42 @@ var sessionHeaders = {};
 var rongIMClient = null;
 var installed = false;
 
-function tryInstall() {
+function tryInstallHooks() {
     if (installed) return;
-    Java.perform(function() {
-        try {
+    try {
+        Java.perform(function() {
             // ============================================
-            // 1. Capture AES Key + IV via Cipher.init
+            // 1. Capture Key via SecretKeySpec (most reliable)
             // ============================================
-            var Cipher = Java.use("javax.crypto.Cipher");
-            Cipher.init.overload('int', 'java.security.Key', 'java.security.spec.AlgorithmParameterSpec').implementation = function(opmode, key, spec) {
-                var algo = this.getAlgorithm();
-                if (algo.indexOf("AES") >= 0 && !sessionKey) {
-                    try {
-                        var encoded = key.getEncoded();
-                        var hex = "";
-                        for (var i = 0; i < encoded.length; i++) hex += ("0" + (encoded[i] & 0xFF).toString(16)).slice(-2);
-                        sessionKey = hex;
-                    } catch(e) {}
-                    try {
-                        var iv = spec.getIV();
-                        var ih = "";
-                        for (var i = 0; i < iv.length; i++) ih += ("0" + (iv[i] & 0xFF).toString(16)).slice(-2);
-                        sessionIV = ih;
-                    } catch(e) {}
+            var SKS = Java.use("javax.crypto.spec.SecretKeySpec");
+            SKS.$init.overload('[B', 'java.lang.String').implementation = function(keyBytes, algo) {
+                if (!sessionKey && algo.indexOf("AES") >= 0 && keyBytes.length === 32) {
+                    var hex = "";
+                    for (var i = 0; i < keyBytes.length; i++) {
+                        hex += ("0" + (keyBytes[i] & 0xFF).toString(16)).slice(-2);
+                    }
+                    sessionKey = hex;
                 }
-                return this.init(opmode, key, spec);
+                return this.$init(keyBytes, algo);
             };
 
             // ============================================
-            // 2. Capture Headers
+            // 2. Capture IV via IvParameterSpec
+            // ============================================
+            var IvSpec = Java.use("javax.crypto.spec.IvParameterSpec");
+            IvSpec.$init.overload('[B').implementation = function(iv) {
+                if (!sessionIV && iv.length === 16) {
+                    var ih = "";
+                    for (var i = 0; i < iv.length; i++) {
+                        ih += ("0" + (iv[i] & 0xFF).toString(16)).slice(-2);
+                    }
+                    sessionIV = ih;
+                }
+                return this.$init(iv);
+            };
+
+            // ============================================
+            // 3. Capture Headers
             // ============================================
             var RB = Java.use("okhttp3.Request$Builder");
             var headerKeys = ["deviceToken", "SMDeviceId", "DeviceId", "clientSession", "Token"];
@@ -48,31 +55,28 @@ function tryInstall() {
             };
 
             // ============================================
-            // 3. Access RongCloud IM Client
+            // 4. Access RongCloud IM Client
             // ============================================
             try {
-                var RongIM = Java.use("io.rong.imlib.RongIMClient");
-                rongIMClient = RongIM.getInstance();
+                rongIMClient = Java.use("io.rong.imlib.RongIMClient").getInstance();
             } catch(e) {}
 
             installed = true;
-            console.log("[bridge] Installed. Key=" + (sessionKey ? "yes" : "pending"));
-        } catch(e) {
-            console.log("[bridge] Install error: " + e);
-        }
-    });
+            console.log("[bridge] Hooks installed. Key=" + (sessionKey ? "yes" : "pending"));
+        });
+    } catch(e) {
+        console.log("[bridge] Install error (will retry): " + e);
+    }
 }
 
-// Poll until installed (360-style delayed class loading)
-setInterval(function() {
-    tryInstall();
-}, 1000);
+// Try immediately — NIS-delayed classes may fail, retry via interval
+tryInstallHooks();
+setInterval(tryInstallHooks, 1000);
 
 // ============================================
-// RPC Exports
+// RPC Exports (always available, outside Java.perform)
 // ============================================
 rpc.exports = {
-    // Get current session encryption parameters
     getSessionKey: function() {
         if (!sessionKey) return JSON.stringify({error: "key not yet captured"});
         return JSON.stringify({
@@ -82,16 +86,14 @@ rpc.exports = {
         });
     },
 
-    // Login — Python handles HTTP encryption, this provides key
-    login: function(credentials) {
+    getStatus: function() {
         return JSON.stringify({
-            session_key_available: sessionKey !== null,
-            key_hex: sessionKey,
-            note: "Use Python login_test.py pattern with this key + IV=clientSession[:16]"
+            key_captured: sessionKey !== null,
+            rong_available: rongIMClient !== null,
+            installed: installed
         });
     },
 
-    // Send text message via RongCloud IM (verified 2026-06-07)
     sendMessage: function(uid, text) {
         var result = {};
         Java.perform(function() {
@@ -108,14 +110,5 @@ rpc.exports = {
             }
         });
         return JSON.stringify(result);
-    },
-
-    // Get connection status
-    getStatus: function() {
-        return JSON.stringify({
-            key_captured: sessionKey !== null,
-            rong_available: rongIMClient !== null,
-            installed: installed
-        });
     }
 };

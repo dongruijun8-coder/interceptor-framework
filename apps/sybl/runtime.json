@@ -4,7 +4,7 @@
     "password": "zxc2005"
   },
   "device": {
-    "serial": "",
+    "serial": "127.0.0.1:7555",
     "app_package": "com.sybl.voiceroom",
     "script_name": "frida_key_bridge.js"
   },
@@ -29,5 +29,5 @@
   "templates": [
     "{nick} 你好~"
   ],
-  "user_source": "首页总榜"
+  "user_source": "房间榜单"
 }

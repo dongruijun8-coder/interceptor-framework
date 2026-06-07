@@ -88,6 +88,9 @@ class FridaSession:
                                 break
                         if found_pid:
                             break
+                # NIS/360 packers hide process from Frida's enumerate_processes — try ADB
+                if not found_pid:
+                    found_pid = self._find_pid_via_adb(self.app_package, self.device_serial)
                 if found_pid:
                     try:
                         self._session = self._device.attach(found_pid)
@@ -150,6 +153,31 @@ class FridaSession:
 
             self._rpc = self._script.exports_sync
             self._connected = True
+
+    @staticmethod
+    def _find_pid_via_adb(package_name: str, device_serial: str = None) -> int | None:
+        """Find process PID via ADB — works around NIS/360 packer hiding
+        processes from Frida's enumerate_processes()."""
+        import subprocess
+        cmd = ["adb"]
+        if device_serial:
+            cmd += ["-s", device_serial]
+        cmd += ["shell", "ps", "-A", "-o", "PID,NAME"]
+        try:
+            raw = subprocess.check_output(
+                cmd, timeout=10, text=True, stderr=subprocess.DEVNULL,
+            )
+            for line in raw.splitlines():
+                if package_name in line:
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        try:
+                            return int(parts[1])  # PID is 2nd column
+                        except ValueError:
+                            pass
+        except Exception:
+            pass
+        return None
 
     def load_script(self, script_path: str) -> None:
         """加载第二个 Frida 脚本到同一 session（如 WS hook 等辅助脚本）。

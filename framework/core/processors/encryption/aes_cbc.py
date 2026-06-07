@@ -1,6 +1,8 @@
 """AES-256-CBC 加密 — 双鱼部落"""
 import base64
 import json
+import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -53,87 +55,171 @@ class AesCbcEncryption(EncryptionProcessor):
         self._iv = seed.replace("-", "")[:16].encode() if len(seed.replace("-", "")) >= 16 else b"FCE3F1A4-5DC3-41"
 
     def _derive_from_frida(self, client) -> None:
-        """Fetch AES key from Frida RPC (frida_key_bridge.js → getSessionKey).
+        """Fetch AES key via Frida CLI subprocess (bypasses NIS anti-Frida).
 
-        Auto-connects Frida if not already connected. Polls up to 30s for the key
-        (App must trigger Cipher.init before the hook can capture it).
+        Python Frida binding is detected by NIS → Java bridge blocked.
+        Frida CLI (frida -H host:port) is NOT detected.
         """
-        session = getattr(client, '_frida_session', None)
+        rt = client._load_runtime()
+        device = rt.get("device", {})
+        serial = device.get("serial", "")
+        package = device.get("app_package",
+                             client.config.get("meta", {}).get("package", ""))
 
-        # ── Auto-connect ──
-        if not session or not session.is_connected:
-            rt = client._load_runtime()
-            device = rt.get("device", {})
-            serial = device.get("serial", "")
-            package = device.get("app_package",
-                                 client.config.get("meta", {}).get("package", ""))
-            script_name = device.get("script_name",
-                                     client.config.get("frida", {}).get("script",
-                                                                        "frida_key_bridge.js"))
+        if not serial or not package:
+            print("[aes-cbc] No device configured, skipping session_key derivation")
+            return
 
-            if not serial or not package:
-                print("[aes-cbc] No device configured, skipping session_key derivation")
-                return
+        # Use bridge_cli.js (SecretKeySpec hooks + RPC exports)
+        script_path = client.config_path.parent / "bridge_cli.js"
+        if not script_path.exists():
+            # Fallback to frida_key_bridge.js
+            script_path = client.config_path.parent / "frida_key_bridge.js"
+        if not script_path.exists():
+            print(f"[aes-cbc] No Frida script found in {client.config_path.parent}")
+            return
 
-            script_path = str(client.config_path.parent / script_name)
-            if not Path(script_path).exists():
-                print(f"[aes-cbc] Script not found: {script_path}")
-                return
+        # ── 1. Get PID via ADB ──
+        pid = self._get_pid_via_adb(serial, package)
+        if not pid:
+            # Try launching the app
+            print("[aes-cbc] App not running, attempting to launch...")
+            subprocess.run(
+                ["adb", "-s", serial, "shell", "monkey", "-p", package, "1"],
+                timeout=15, capture_output=True,
+            )
+            time.sleep(5)
+            pid = self._get_pid_via_adb(serial, package)
 
-            from framework.bridge.frida_session import FridaSessionManager
-            try:
-                session = FridaSessionManager().get_or_create(
-                    client.app_name, serial, package, script_path)
-                client.set_frida_session(session)
-                print(f"[aes-cbc] Frida auto-connected: {serial} / {package}")
-            except Exception as e:
-                client._notify("error", f"Frida 连接失败: {e}")
-                print(f"[aes-cbc] Frida auto-connect failed: {e}")
-                return
+        if not pid:
+            client._notify("error",
+                           f"找不到进程 {package}，请手动打开 App")
+            return
 
-        # ── Poll for key ──
-        client._notify("info", "等待密钥... 请确保 App 已打开并完成登录")
+        print(f"[aes-cbc] App PID={pid}, launching Frida CLI...")
+
+        # ── 2. Launch Frida CLI ──
+        frida_cmd = (
+            f"frida -H 127.0.0.1:27042 -p {pid} "
+            f"-l {script_path}"
+        )
+        try:
+            # Use shell=True for cross-platform (bash on Unix, cmd on Windows)
+            proc = subprocess.Popen(
+                frida_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                shell=True,
+            )
+        except FileNotFoundError:
+            client._notify("error", "frida CLI 未安装，请确认 PATH 中包含 frida")
+            return
+
+        # ── 3. Wait for hooks ready + trigger encryption ──
+        client._notify("info", "等待密钥... Frida CLI 已启动")
         deadline = time.time() + 30
+        key_data = None
+        hooks_ready = False
+
         while time.time() < deadline:
+            line = proc.stdout.readline()
+            if line:
+                print(f"[aes-cbc] {line.strip()[:120]}")
+                # Wait for hooks before tapping
+                if not hooks_ready and ("Ready" in line or "Hooks installed" in line):
+                    hooks_ready = True
+                    print("[aes-cbc] Hooks ready, tapping screen...")
+                    # Tap to trigger network requests
+                    for i in range(5):
+                        subprocess.run(
+                            ["adb", "-s", serial, "shell", "input", "tap",
+                             str(400 + i * 40), str(500 + i * 20)],
+                            timeout=5, capture_output=True,
+                        )
+                        time.sleep(0.5)
+
+                if "KEY_JSON:" in line:
+                    try:
+                        key_data = json.loads(line.split("KEY_JSON: ", 1)[1])
+                        break
+                    except json.JSONDecodeError:
+                        pass
+            elif proc.poll() is not None:
+                # Process exited
+                stderr = proc.stderr.read()
+                print(f"[aes-cbc] Frida CLI exited prematurely: {stderr[:200]}")
+                break
+            else:
+                time.sleep(0.2)
+
+        if not key_data:
+            client._notify("error",
+                           "密钥捕获超时（30s）。请确认 App 已登录并触发网络请求")
             try:
-                rpc = session._rpc_second or session._rpc
-                raw = rpc.getSessionKey()
-                if isinstance(raw, str):
-                    import json as _json
-                    data = _json.loads(raw)
-                else:
-                    data = raw
-
-                key_hex = data.get("key_hex", "")
-                if key_hex:
-                    iv_hex = data.get("iv_hex", "")
-                    headers = data.get("headers", {})
-
-                    self._key = bytes.fromhex(key_hex)
-                    # IV = clientSession[:16] (16 bytes ASCII)
-                    client_session = headers.get("clientSession", "")
-                    if client_session and len(client_session) >= 16:
-                        self._iv = client_session[:16].encode("utf-8")
-                    elif iv_hex:
-                        self._iv = bytes.fromhex(iv_hex)
-                    else:
-                        self._iv = b"\x00" * 16
-
-                    client._notify("info",
-                                   f"密钥捕获成功 ({len(self._key)} bytes)")
-                    print(f"[aes-cbc] Session key loaded via Frida "
-                          f"({len(self._key)} bytes)")
-                    return
-
-                # Key not yet captured — App Cipher.init hasn't fired
-                print("[aes-cbc] Waiting for key... (Cipher.init not triggered yet)")
+                proc.kill()
             except Exception:
-                pass  # RPC not ready yet, keep polling
+                pass
+            return
 
-            time.sleep(1.0)
+        # ── 4. Parse key ──
+        key_hex = key_data.get("key_hex", "")
+        iv_hex = key_data.get("iv_hex", "")
+        headers = key_data.get("headers", {})
 
-        client._notify("error",
-                       "密钥捕获超时（30s）。请确认 App 已打开并触发登录请求")
+        if not key_hex:
+            client._notify("error", "Frida 返回空密钥")
+            return
+
+        self._key = bytes.fromhex(key_hex)
+        # IV = clientSession[:16] (16 bytes ASCII)
+        client_session = headers.get("clientSession", "")
+        if client_session and len(client_session) >= 16:
+            self._iv = client_session[:16].encode("utf-8")
+        elif iv_hex:
+            self._iv = bytes.fromhex(iv_hex)
+        else:
+            self._iv = b"\x00" * 16
+
+        # Inject captured session headers into client (required for auth)
+        for hk in ("deviceToken", "SMDeviceId", "DeviceId",
+                    "clientSession", "Token"):
+            if hk in headers:
+                client._default_headers[hk] = headers[hk]
+        # Store Token for auth flow
+        if "Token" in headers:
+            client._auth_token = headers["Token"]
+
+        # ── 5. Store Frida process for messaging RPC ──
+        # Save as (proc, script_path) tuple for frida-rpc processor
+        client._frida_cli_proc = proc
+        client._frida_cli_script = str(script_path)
+
+        client._notify("info",
+                       f"密钥捕获成功 ({len(self._key)} bytes)")
+        print(f"[aes-cbc] Session key loaded via Frida CLI "
+              f"({len(self._key)} bytes, IV from clientSession)")
+
+    @staticmethod
+    def _get_pid_via_adb(serial: str, package: str) -> int | None:
+        """Find process PID via ADB shell ps."""
+        try:
+            raw = subprocess.check_output(
+                ["adb", "-s", serial, "shell", "ps", "-A"],
+                timeout=10, text=True, stderr=subprocess.DEVNULL,
+            )
+            for line in raw.splitlines():
+                if package in line:
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        try:
+                            return int(parts[1])  # PID is 2nd column
+                        except ValueError:
+                            pass
+        except Exception:
+            pass
+        return None
 
     def encode(self, body: dict) -> bytes:
         if self._key is None:

@@ -356,7 +356,6 @@ function updateRooms() {
       '<div><div style="font-size:22px;font-weight:600;color:var(--success)">' + (a.sent || 0) + '</div><div style="color:var(--text-muted)">已发送</div></div>' +
       '<div><div style="font-size:22px;font-weight:600;color:var(--danger)">' + (a.failed || 0) + '</div><div style="color:var(--text-muted)">失败</div></div>' +
       '</div></div>';
-    document.getElementById('roomCount').textContent = '';
     document.getElementById('roomFooter').classList.add('hidden');
   } else {
     panelHeader.innerHTML = '房间列表 <span class="count" id="roomCount">' + (a.done_rooms||0) + ' / ' + (a.total_rooms||0) + '</span>';
