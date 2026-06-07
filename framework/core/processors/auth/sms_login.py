@@ -22,6 +22,12 @@ class SmsLoginAuth(AuthProcessor):
             },
         }
 
+    def validate(self, client) -> tuple:
+        warnings = []
+        if not self.params.get("login_endpoint"):
+            warnings.append("sms-login 缺少 login_endpoint")
+        return len(warnings) == 0, warnings
+
     def authenticate(self, client) -> bool:
         creds = self.load_credentials(client)
         phone = creds.get("phone", "")

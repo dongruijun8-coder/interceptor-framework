@@ -25,6 +25,22 @@ class PasswordLoginAuth(AuthProcessor):
             "required": ["endpoint", "fields", "response_mapping"],
         }
 
+    def validate(self, client) -> tuple:
+        warnings = []
+        ep = self.params.get("endpoint", "")
+        if not ep:
+            warnings.append("password-login 缺少 endpoint")
+        fields = self.params.get("fields", {})
+        if "phone" not in fields or "password" not in fields:
+            warnings.append("password-login 缺少 fields.phone 或 fields.password 映射")
+        rt = client._load_runtime()
+        creds = rt.get("credentials", {})
+        if not creds.get("phone"):
+            warnings.append("未配置手机号，请在 Dashboard 设置凭据")
+        if not creds.get("password"):
+            warnings.append("未配置密码，请在 Dashboard 设置凭据")
+        return len(warnings) == 0, warnings
+
     def authenticate(self, client) -> bool:
         creds = self.load_credentials(client)
         endpoint = self.params["endpoint"]

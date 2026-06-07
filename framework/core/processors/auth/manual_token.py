@@ -15,6 +15,9 @@ class ManualTokenAuth(AuthProcessor):
             },
         }
 
+    def validate(self, client) -> tuple:
+        return True, []
+
     def authenticate(self, client) -> bool:
         creds = self.load_credentials(client)
         token = creds.get(self.params.get("token_field", "token"), "")

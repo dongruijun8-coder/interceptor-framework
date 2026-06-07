@@ -9,6 +9,9 @@ class PlaintextAuth(AuthProcessor):
     def params_schema(cls) -> dict:
         return {"type": "object", "properties": {}}
 
+    def validate(self, client) -> tuple:
+        return True, []
+
     def authenticate(self, client) -> bool:
         creds = self.load_credentials(client)
         token = creds.get("token", "") or client.config.get("token", "")

@@ -31,5 +31,16 @@ class FridaRpcMessaging(MessagingProcessor):
         except FridaDisconnectedError:
             raise  # Re-raise — BaseClient.run_room catches this to stop pipeline
 
+    def validate(self, client) -> tuple:
+        warnings = []
+        script = self.params.get("script_name", "")
+        if not script:
+            warnings.append("frida-rpc 缺少 script_name")
+        else:
+            sp = client.config_path.parent / script
+            if not sp.exists():
+                warnings.append(f"frida-rpc 脚本 {script} 不存在")
+        return len(warnings) == 0, warnings
+
 
 ProcessorRegistry.register(FridaRpcMessaging)

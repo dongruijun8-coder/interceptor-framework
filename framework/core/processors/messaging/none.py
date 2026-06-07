@@ -8,4 +8,8 @@ class NoneMessaging(MessagingProcessor):
     def send(self, client, uid: str, text: str) -> dict:
         return {"success": False, "error": "messaging 未配置 — 私信通道不存在"}
 
+    def validate(self, client) -> tuple:
+        warnings = ["messaging=none: 消息发送已禁用"]
+        return False, warnings
+
 

@@ -13,6 +13,11 @@ class BaseProcessor(ABC):
     def params_schema(cls) -> dict:
         return {}
 
+    def validate(self, client) -> tuple:
+        """返回 (ok: bool, warnings: list[str])。
+        派生类覆盖此方法做自检。默认始终通过。"""
+        return True, []
+
 
 class EncryptionProcessor(BaseProcessor, ABC):
     category = "encryption"

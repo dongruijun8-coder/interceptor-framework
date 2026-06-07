@@ -48,5 +48,11 @@ class RongcloudTcpMessaging(MessagingProcessor):
         # 3. Send private message via RongCloud protocol
         return {"success": False, "error": f"融云 TCP 待实现 (navi OK, {len(servers)} 节点)"}
 
+    def validate(self, client) -> tuple:
+        warnings = []
+        if not self.params.get("app_key"):
+            warnings.append("rongcloud-tcp 缺少 app_key")
+        return len(warnings) == 0, warnings
+
 
 ProcessorRegistry.register(RongcloudTcpMessaging)

@@ -35,6 +35,22 @@ class AesCbcEncryption(EncryptionProcessor):
             },
         }
 
+    def validate(self, client) -> tuple:
+        warnings = []
+        if self._key is None:
+            method = self.params.get("key_derivation", "device_token")
+            if method == "session_key":
+                bridge = client.config_path.parent / "bridge_cli.js"
+                if not bridge.exists():
+                    warnings.append(
+                        "key_derivation=session_key 需要 bridge_cli.js，请使用模块化 Frida 生成")
+            elif method == "device_token":
+                if not client.config.get("device_token"):
+                    warnings.append("key_derivation=device_token 但 device_token 未配置")
+        if not client._base_url:
+            warnings.append("server.base_url 未配置")
+        return len(warnings) == 0, warnings
+
     def derive_key(self, client) -> None:
         if self._key is not None:
             return
@@ -99,9 +115,16 @@ class AesCbcEncryption(EncryptionProcessor):
         print(f"[aes-cbc] App PID={pid}, launching Frida CLI...")
 
         # ── 2. Launch Frida CLI ──
+        # Copy script to temp to avoid Chinese path issues with shell=True
+        import tempfile as _tempfile
+        _tmp_dir = Path(_tempfile.gettempdir()) / "sybl_frida"
+        _tmp_dir.mkdir(parents=True, exist_ok=True)
+        _tmp_script = _tmp_dir / "bridge_cli.js"
+        _tmp_script.write_text(script_path.read_text(encoding="utf-8"),
+                               encoding="utf-8")
         frida_cmd = (
-            f"frida -H 127.0.0.1:27042 -p {pid} "
-            f"-l {script_path}"
+            f'frida -H 127.0.0.1:27042 -p {pid} '
+            f'-l "{_tmp_script}"'
         )
         try:
             # Use shell=True for cross-platform (bash on Unix, cmd on Windows)

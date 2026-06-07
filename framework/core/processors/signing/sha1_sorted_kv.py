@@ -32,6 +32,12 @@ class Sha1SortedKvSigning(SigningProcessor):
             },
         }
 
+    def validate(self, client) -> tuple:
+        warnings = []
+        if not self.params.get("secret") and not self.params.get("secret_key"):
+            warnings.append("sha1-sorted-kv 缺少 secret/secret_key 参数")
+        return len(warnings) == 0, warnings
+
     def sign(self, url: str, headers: dict, params: dict = None) -> tuple:
         """返回 (headers, query_params) — 签名加到 query string"""
         secret = self.params.get("secret_key", "")

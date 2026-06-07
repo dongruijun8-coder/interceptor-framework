@@ -16,6 +16,12 @@ class HeaderTokenAuth(AuthProcessor):
             },
         }
 
+    def validate(self, client) -> tuple:
+        warnings = []
+        if not client._auth_token:
+            warnings.append("header-token 需要 auth_token，但当前为空")
+        return len(warnings) == 0, warnings
+
     def authenticate(self, client) -> bool:
         creds = self.load_credentials(client)
         header_name = self.params.get("header_name", "access-token")

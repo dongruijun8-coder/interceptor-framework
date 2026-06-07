@@ -26,6 +26,12 @@ class Md5H5Signing(SigningProcessor):
             },
         }
 
+    def validate(self, client) -> tuple:
+        warnings = []
+        if not self.params.get("salt") and not self.params.get("secret"):
+            warnings.append("md5-h5-sign 缺少 secret 参数")
+        return len(warnings) == 0, warnings
+
     def sign(self, url: str, headers: dict, params: dict = None) -> tuple:
         """返回 (headers, query_params) — h_sn 签名加到 query string"""
         secret = self.params.get("secret", "")

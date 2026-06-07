@@ -11,3 +11,6 @@ class PlaintextMessaging(MessagingProcessor):
 
     def send(self, client, uid: str, text: str) -> dict:
         return {"success": False, "error": "plaintext messaging: 请在 config pipeline.messaging 指定具体的消息处理器"}
+
+    def validate(self, client) -> tuple:
+        return True, []

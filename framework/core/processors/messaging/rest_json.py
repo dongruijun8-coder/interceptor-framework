@@ -63,6 +63,15 @@ class RestJsonMessaging(MessagingProcessor):
             return {"success": True, "error": ""}
         return {"success": False, "error": resp.get("message", "send failed")}
 
+    def validate(self, client) -> tuple:
+        warnings = []
+        ep = client.config.get("endpoints", {}).get("send_message")
+        if ep and ep.get("body"):
+            pass
+        elif not self.params.get("send_path") and not self.params.get("precheck_path"):
+            warnings.append("rest-json 缺少 send_path（非 config-driven 模式需要）")
+        return len(warnings) == 0, warnings
+
     def _send_from_template(self, client, to_uid: str, text: str, ep: dict) -> dict:
         """使用 config 中 send_message 端点的 body 模板发送私信。
 

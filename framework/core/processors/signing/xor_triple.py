@@ -23,6 +23,16 @@ class XorTripleSigning(SigningProcessor):
                 "p3_key": {"type": "string", "description": "4-byte hex for p3 XOR (write only)"},
             },
             "required": ["read_key", "write_key", "p3_key"],
+
+    def validate(self, client) -> tuple:
+        warnings = []
+        pk = self.params.get("p3_key", "")
+        if not pk or pk == "00000000":
+            warnings.append("p3_key 为默认值 00000000，请确认与实际 App 一致")
+        rk = self.params.get("read_key", "")
+        if not rk:
+            warnings.append("read_key 未配置，签名可能无法通过服务端验证")
+        return len(warnings) == 0, warnings
         }
 
     def sign(self, url: str, headers: dict, params: dict = None) -> tuple:

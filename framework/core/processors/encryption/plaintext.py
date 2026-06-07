@@ -10,6 +10,9 @@ class PlaintextEncryption(EncryptionProcessor):
     def params_schema(cls) -> dict:
         return {"type": "object", "properties": {}}
 
+    def validate(self, client) -> tuple:
+        return True, []
+
     def encode(self, body: dict) -> bytes:
         return json.dumps(body, ensure_ascii=False).encode("utf-8")
 
