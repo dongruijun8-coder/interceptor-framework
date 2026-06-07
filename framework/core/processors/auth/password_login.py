@@ -38,9 +38,8 @@ class PasswordLoginAuth(AuthProcessor):
             else:
                 body[api_field] = creds.get(internal_key, "")
 
-        base = client.config["base_url"]
         try:
-            resp = client._post(f"{base}{endpoint}", body)
+            resp = client._post(f"{client._base_url}{endpoint}", body)
         except Exception as e:
             client._notify("error", f"登录请求失败: {e}")
             return False
