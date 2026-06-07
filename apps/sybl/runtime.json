@@ -1,0 +1,33 @@
+{
+  "credentials": {
+    "phone": "13721057968",
+    "password": "zxc2005"
+  },
+  "device": {
+    "serial": "",
+    "app_package": "com.sybl.voiceroom",
+    "script_name": "frida_key_bridge.js"
+  },
+  "settings": {},
+  "data_sources": {
+    "逍遥榜": "carefree",
+    "财富榜": "rich",
+    "魅力榜": "charm",
+    "守护榜": "guard"
+  },
+  "periods": {
+    "日榜": "day",
+    "周榜": "week",
+    "上周榜": "last_week",
+    "月榜": "month"
+  },
+  "genders": {
+    "全部": null,
+    "男": 1,
+    "女": 2
+  },
+  "templates": [
+    "{nick} 你好~"
+  ],
+  "user_source": "首页总榜"
+}

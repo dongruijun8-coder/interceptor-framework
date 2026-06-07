@@ -1,0 +1,189 @@
+{
+  "meta": {
+    "app_name": "sybl",
+    "package": "com.sybl.voiceroom",
+    "version": "2.50.0",
+    "config_schema": "2.0"
+  },
+  "frida": {
+    "enabled": true,
+    "device": "usb",
+    "package": "com.sybl.voiceroom",
+    "script": "frida_key_bridge.js",
+    "note": "Requires hluda-server (NOT frida-server). NIS anti-Frida detection."
+  },
+  "server": {
+    "base_url": "https://ui-api-cn.shuangyuxingqiu.com",
+    "default_headers": {
+      "ClientType": "Android",
+      "DeviceType": "Samsung SM-S9280",
+      "AppVersion": "2.47.1",
+      "Build": "334",
+      "Channel": "oppo",
+      "SystemVersion": "Android12",
+      "Content-Type": "application/json; charset=utf-8",
+      "isEmulator": "true",
+      "isRooted": "false",
+      "hasFrida": "false",
+      "hasXposed": "false",
+      "isRunningInMultiAccount": "false",
+      "isAccessibilityEnabled": "false",
+      "AccessibilityServices": "[]"
+    }
+  },
+  "pipeline": {
+    "encryption": {
+      "plugin": "aes-cbc",
+      "params": {
+        "key": null,
+        "iv": null,
+        "key_derivation": "session_key",
+        "note": "Key=32B ASCII string, IV=clientSession[:16]. Both fetched via Frida RPC at session start."
+      }
+    },
+    "signing": {
+      "plugin": "xor-triple-sign",
+      "params": {
+        "read_key": "01528e5f",
+        "write_key": "01528e5f",
+        "p3_key": "00000000",
+        "note": "p1 = p2 XOR key(repeated). Login: p1=p2=p3. Key may vary per session."
+      }
+    },
+    "auth": {
+      "plugin": "password-login",
+      "params": {
+        "endpoint": "/UI/PasswordLoginPage/passwordLogin",
+        "fields": {
+          "phone": "phone",
+          "password": "password"
+        },
+        "response_mapping": {
+          "token": "token",
+          "uid": "id",
+          "rongcloud_token": "rongCloudToken",
+          "mqtt_host": "mqttHost",
+          "mqtt_port": "mqttPort"
+        }
+      }
+    },
+    "messaging": {
+      "plugin": "frida-rpc",
+      "params": {
+        "script_name": "frida_key_bridge.js",
+        "note": "RongCloud IM via RongIMClient.sendMessage(PRIVATE, uid, TextMessage)"
+      }
+    }
+  },
+  "endpoints": {
+    "all_rooms": {
+      "path": "/UI/Room/Home/roomList",
+      "method": "POST",
+      "body": {
+        "page": "{{page}}",
+        "page_size": 20
+      },
+      "pagination": {
+        "type": "page_number",
+        "size": 20,
+        "stop_on": "empty_list"
+      },
+      "output_mapping": {
+        "id": "id",
+        "name": "name",
+        "type": "tag"
+      }
+    },
+    "join_room": {
+      "path": "/UI/User/joinRoom",
+      "method": "POST",
+      "body": {
+        "roomId": "{{room.id}}",
+        "password": ""
+      },
+      "note": "roomId is camelCase. Gson omits null password field."
+    },
+    "ranking": {
+      "path": "/UI/Room/UserRank/list",
+      "method": "POST",
+      "body": {
+        "room_id": "{{room.id}}",
+        "mode": "{{data_source_key}}",
+        "rank_type": "{{period_key}}",
+        "page": 1,
+        "page_size": 20
+      },
+      "pagination": {
+        "type": "page_number",
+        "size": 20,
+        "stop_on": "empty_list"
+      },
+      "output_mapping": {
+        "uid": "user.uid",
+        "nick": "user.nickname",
+        "amount": "rank.score"
+      }
+    },
+    "global_ranking": {
+      "path": "/UI/User/HomePage/Ranking/user",
+      "method": "POST",
+      "body": {
+        "mode": "{{data_source_key}}",
+        "rank_type": "{{period_key}}"
+      },
+      "pagination": {
+        "type": "page_number",
+        "size": 100,
+        "stop_on": "empty_list"
+      },
+      "output_mapping": {
+        "uid": "user.uid",
+        "nick": "user.nickname"
+      }
+    }
+  },
+  "user_sources": {
+    "房间榜单": {
+      "endpoint": "ranking",
+      "type": "per_room",
+      "filters": ["data_source", "period"]
+    },
+    "首页总榜": {
+      "endpoint": "global_ranking",
+      "type": "global",
+      "filters": ["data_source", "period"]
+    },
+    "房间在线": {
+      "endpoint": null,
+      "type": "per_room",
+      "filters": [],
+      "note": "待实现：sybl 无在线用户接口"
+    }
+  },
+  "runtime_config": {
+    "data_sources": {
+      "逍遥榜": "carefree",
+      "财富榜": "rich",
+      "魅力榜": "charm",
+      "守护榜": "guard"
+    },
+    "periods": {
+      "日榜": "day",
+      "周榜": "week",
+      "上周榜": "last_week",
+      "月榜": "month"
+    },
+    "genders": {
+      "全部": null,
+      "男": 1,
+      "女": 2
+    },
+    "templates": ["{nick} 你好~"]
+  },
+  "_rpc_targets": {
+    "key_acquisition": "Cipher.init hook -> key.getEncoded()",
+    "message_send": "RongCloud SDK -> RongIMClient.sendMessage()",
+    "sp_path": "shared_prefs/AUTH_APP_INFO.xml",
+    "hluda_required": true
+  }
+}

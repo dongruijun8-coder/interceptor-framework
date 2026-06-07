@@ -48,17 +48,23 @@ class BaseClient:
         rt = self._load_runtime()
         settings = rt.get("settings", {})
         self._interval = settings.get("send_interval", 3)
-        self._templates = rt.get("templates", ["{nick} 你好~"])
+        self._templates = rt.get("templates", self.config.get("runtime_config", {}).get("templates", ["{nick} 你好~"]))
         self._data_sources = rt.get("data_sources", self.config.get("runtime_config", {}).get("data_sources", {}))
         self._periods = rt.get("periods", self.config.get("runtime_config", {}).get("periods", {}))
         self._genders = rt.get("genders", self.config.get("runtime_config", {}).get("genders", {}))
 
+        # User source — persisted selection takes priority, then config default
+        self._user_sources = self.config.get("user_sources", {})
+        src_keys = list(self._user_sources.keys())
+        self._user_source = rt.get("user_source", src_keys[0] if src_keys else "")
+        self._current_source_cfg = self._user_sources.get(self._user_source, {})
+
         keys = list(self._data_sources.keys())
-        self._data_source = keys[0] if keys else ""
+        self._data_source = rt.get("data_source", keys[0] if keys else "")
         keys = list(self._periods.keys())
-        self._period = keys[0] if keys else ""
+        self._period = rt.get("period", keys[0] if keys else "")
         keys = list(self._genders.keys())
-        self._gender = keys[0] if keys else ""
+        self._gender = rt.get("gender", keys[0] if keys else "")
 
         self._running = False
         self._pause_event = threading.Event()
@@ -524,6 +530,44 @@ class BaseClient:
 
     # ═══ Pipeline (unchanged from original) ═══
 
+    def fetch_users(self, source_name: str, room: dict = None) -> list:
+        """根据用户来源拉取用户列表。
+
+        模板变量从 self._data_source / self._period 解析，
+        与 fetch_room_ranking 保持一致。
+        """
+        cfg = self._user_sources.get(source_name)
+        if not cfg:
+            return []
+
+        ep_name = cfg.get("endpoint")
+        if not ep_name:
+            return []
+
+        ep = dict(self.config["endpoints"][ep_name])
+
+        # Resolve template variables
+        ds_key = self._data_sources.get(self._data_source, "")
+        period_key = self._periods.get(self._period, "day")
+
+        if cfg["type"] == "global":
+            body = self._fill_template(
+                ep.get("body", {}),
+                data_source_key=ds_key,
+                period_key=period_key,
+            )
+            items = self._fetch_paginated(ep, body)
+            mapping = ep.get("output_mapping", {})
+            if mapping:
+                items = [self._map_fields(u, mapping) for u in items]
+            return items
+
+        elif cfg["type"] == "per_room":
+            if room is None:
+                return []
+            # Reuse existing per-room ranking logic
+            return self.fetch_room_ranking(room, self._period)
+
     def run_pipeline(self) -> None:
         self._running = True
         self._pause_event.set()
@@ -535,6 +579,72 @@ class BaseClient:
                 return
             self._authenticated = True
 
+        cfg = self._current_source_cfg
+        if not cfg:
+            self._notify("error", "未配置用户来源 (user_sources 为空)")
+            self._running = False
+            return
+
+        if cfg["type"] == "global":
+            self._run_global(cfg)
+        else:
+            self._run_per_room(cfg)
+
+        self._running = False
+
+    def _run_global(self, cfg: dict) -> None:
+        """全站榜单模式：不扫描房间，直接拉取用户列表发送。"""
+        self._notify("info", f"全站模式: {self._user_source}")
+        try:
+            users = self.fetch_users(self._user_source)
+        except Exception as e:
+            self._notify("error", f"拉取用户失败: {e}")
+            return
+
+        with self._lock:
+            self._progress["total_users"] = len(users)
+            self._progress["sent_total"] = 0
+            self._progress["failed_total"] = 0
+
+        self._notify("info", f"拉取完成: {len(users)} 人")
+
+        # Gender filter
+        gender_target = self._genders.get(self._gender)
+        if gender_target is not None:
+            users = [u for u in users if u.get("gender") == gender_target]
+            with self._lock:
+                self._progress["total_users"] = len(users)
+
+        # Sort by amount descending
+        users.sort(key=lambda u: u.get("amount", 0), reverse=True)
+
+        # Store for frontend display
+        with self._lock:
+            self._ranking_users = [dict(u, status="wait") for u in users]
+
+        # Batch-mark already-sent
+        skip_uids = set()
+        for user in users:
+            uid = str(user.get("uid", ""))
+            if uid and self.state.is_sent_today(uid):
+                skip_uids.add(uid)
+        if skip_uids:
+            with self._lock:
+                for ru in self._ranking_users:
+                    if str(ru.get("uid")) in skip_uids:
+                        ru["status"] = "sent"
+
+        # Send loop (no room context)
+        for user in users:
+            if not self._wait_if_paused():
+                break
+            self._send_to_user(user, room=None)
+
+        if self._running:
+            self._notify("done", "全站发送完成")
+
+    def _run_per_room(self, cfg: dict) -> None:
+        """房间遍历模式：现有逻辑不变。"""
         self._rooms = self.state.load_rooms()
         if not self._rooms:
             self._notify("info", "扫描房间...")
@@ -574,7 +684,81 @@ class BaseClient:
                 current_room_name="",
             )
             self._notify("done", "全部房间完成")
-        self._running = False
+
+    def _send_to_user(self, user: dict, room: dict = None) -> None:
+        """发送消息给单个用户。global 和 per_room 共用。"""
+        uid = str(user.get("uid", ""))
+        nick = user.get("nick", "")
+        room_name = room.get("name", "") if room else ""
+
+        if self.state.is_sent_today(uid):
+            return
+
+        template = random.choice(self._templates)
+        text = template.replace("{nick}", nick).replace("{room_name}", room_name)
+
+        with self._lock:
+            self._current_user = {
+                "uid": uid, "nick": nick, "text": text,
+                "room": room_name,
+                "time": time.strftime("%H:%M:%S"),
+            }
+            for ru in self._ranking_users:
+                if str(ru.get("uid")) == uid:
+                    ru["status"] = "sending"
+                    break
+
+        # 短暂延迟让前端轮询捕获"sending"状态
+        time.sleep(0.6)
+
+        try:
+            result = self.send_message(uid, text)
+        except Exception as e:
+            result = {"success": False, "error": str(e)}
+
+        entry = {
+            "uid": uid, "nick": nick,
+            "room": room_name,
+            "time": time.strftime("%H:%M:%S"),
+            "success": result.get("success", False),
+            "error": result.get("error", ""),
+        }
+
+        if result.get("success"):
+            entry["text"] = text
+            self.state.mark_sent(uid, nick, room_name)
+            with self._lock:
+                sent = self._progress.get("sent_total", 0) + 1
+                self._progress["sent_total"] = sent
+                self.state.save_progress(sent_total=sent)
+                self._current_user = {}
+                self._recent_sent.insert(0, entry)
+                if len(self._recent_sent) > 20:
+                    self._recent_sent = self._recent_sent[:20]
+                for ru in self._ranking_users:
+                    if str(ru.get("uid")) == uid:
+                        ru["status"] = "sent"
+                        break
+            self._notify("sent", {"uid": uid, "nick": nick, "text": text})
+        else:
+            with self._lock:
+                failed = self._progress.get("failed_total", 0) + 1
+                self._progress["failed_total"] = failed
+                self.state.save_progress(failed_total=failed)
+                self._current_user = {}
+                self._recent_failed.insert(0, entry)
+                if len(self._recent_failed) > 20:
+                    self._recent_failed = self._recent_failed[:20]
+                for ru in self._ranking_users:
+                    if str(ru.get("uid")) == uid:
+                        ru["status"] = "failed"
+                        break
+            self._notify("failed", {
+                "uid": uid, "nick": nick,
+                "error": result.get("error", "unknown"),
+            })
+
+        time.sleep(self._interval)
 
     def run_room(self, room: dict, idx: int) -> None:
         room_name = room.get("name", "")
@@ -587,7 +771,7 @@ class BaseClient:
             )
 
         try:
-            users = self.fetch_room_ranking(room, self._period)
+            users = self.fetch_users(self._user_source, room)
         except Exception as e:
             with self._lock:
                 self._ranking_users = []
@@ -619,78 +803,7 @@ class BaseClient:
         for user in users:
             if not self._wait_if_paused():
                 break
-
-            uid = user.get("uid", "")
-            nick = user.get("nick", "")
-
-            if self.state.is_sent_today(uid):
-                continue
-
-            template = random.choice(self._templates)
-            text = template.replace("{nick}", nick).replace("{room_name}", room.get("name", ""))
-
-            # 记录当前正在发的用户 + 标记排行榜状态
-            send_start = time.time()
-            with self._lock:
-                self._current_user = {"uid": uid, "nick": nick, "text": text,
-                                       "room": room.get("name", ""),
-                                       "time": time.strftime("%H:%M:%S")}
-                for ru in self._ranking_users:
-                    if str(ru.get("uid")) == str(uid):
-                        ru["status"] = "sending"
-                        break
-
-            # 短暂延迟让前端轮询捕获"sending"状态（前端3秒轮询，太快完成会跳过）
-            time.sleep(0.6)
-
-            try:
-                result = self.send_message(uid, text)
-            except Exception as e:
-                result = {"success": False, "error": str(e)}
-
-            entry = {"uid": uid, "nick": nick,
-                     "room": room.get("name", ""),
-                     "time": time.strftime("%H:%M:%S"),
-                     "success": result.get("success", False),
-                     "error": result.get("error", "")}
-
-            if result.get("success"):
-                entry["text"] = text
-                self.state.mark_sent(uid, nick, room.get("name", ""))
-                with self._lock:
-                    sent = self._progress.get("sent_total", 0) + 1
-                    self._progress["sent_total"] = sent
-                    self.state.save_progress(sent_total=sent)
-                    self._current_user = {}
-                    self._recent_sent.insert(0, entry)
-                    if len(self._recent_sent) > 20:
-                        self._recent_sent = self._recent_sent[:20]
-                    # Update ranking user status
-                    for ru in self._ranking_users:
-                        if str(ru.get("uid")) == str(uid):
-                            ru["status"] = "sent"
-                            break
-                self._notify("sent", {"uid": uid, "nick": nick, "text": text})
-            else:
-                with self._lock:
-                    failed = self._progress.get("failed_total", 0) + 1
-                    self._progress["failed_total"] = failed
-                    self.state.save_progress(failed_total=failed)
-                    self._current_user = {}
-                    self._recent_failed.insert(0, entry)
-                    if len(self._recent_failed) > 20:
-                        self._recent_failed = self._recent_failed[:20]
-                    # Update ranking user status
-                    for ru in self._ranking_users:
-                        if str(ru.get("uid")) == str(uid):
-                            ru["status"] = "failed"
-                            break
-                self._notify("failed", {
-                    "uid": uid, "nick": nick,
-                    "error": result.get("error", "unknown"),
-                })
-
-            time.sleep(self._interval)
+            self._send_to_user(user, room)
 
     # ═══ Control ═══
 
@@ -774,6 +887,10 @@ class BaseClient:
             "data_source": self._data_source,
             "period": self._period,
             "gender": self._gender,
+            "user_source": self._user_source,
+            "available_user_sources": self._user_sources,
+            "current_source_cfg": self._current_source_cfg,
+            "total_users": self._progress.get("total_users", 0),
             "messaging_type": self._messenger.name,
             "available_data_sources": self._data_sources,
             "available_periods": self._periods,

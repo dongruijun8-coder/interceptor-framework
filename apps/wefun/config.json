@@ -233,6 +233,13 @@
       }
     }
   },
+  "user_sources": {
+    "房间在线": {
+      "endpoint": "ranking",
+      "type": "per_room",
+      "filters": []
+    }
+  },
   "runtime_config": {
     "settings": { "send_interval": 5 },
     "data_sources": {

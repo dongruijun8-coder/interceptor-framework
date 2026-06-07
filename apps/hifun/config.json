@@ -179,6 +179,13 @@
       }
     }
   },
+  "user_sources": {
+    "房间榜单": {
+      "endpoint": "ranking",
+      "type": "per_room",
+      "filters": ["period"]
+    }
+  },
 
   "runtime_config": {
     "settings": { "send_interval": 5 },

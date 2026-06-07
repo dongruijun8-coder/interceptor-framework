@@ -158,6 +158,22 @@ def api_app_settings(app_id):
     if "gender" in data:
         runtime["gender"] = data["gender"]
         task._gender = data["gender"]
+    # User source — only allow switch when task is not running
+    if "user_source" in data:
+        if task.status == "running":
+            return jsonify({
+                "success": False,
+                "error": "请先停止任务再切换用户来源",
+            }), 409
+        new_source = data["user_source"]
+        if new_source not in task._user_sources:
+            return jsonify({
+                "success": False,
+                "error": f"无效的用户来源: {new_source}",
+            }), 400
+        task._user_source = new_source
+        task._current_source_cfg = task._user_sources[new_source]
+        runtime["user_source"] = new_source
     # Credentials & profile (token, uid, age, gender, device_id)
     if "credentials" in data:
         runtime["credentials"] = data["credentials"]
