@@ -11,6 +11,7 @@ import urllib3
 
 from .state_manager import StateManager
 from .processor_registry import ProcessorRegistry
+from .diagnose import DiagnoseLogger
 from framework.bridge.frida_session import FridaDisconnectedError
 
 
@@ -34,6 +35,11 @@ class BaseClient:
         self._signer = ProcessorRegistry.load(pipeline.get("signing", "plaintext"), "signing")
         self._auth_processor = ProcessorRegistry.load(pipeline.get("auth", "manual-token"), "auth")
         self._messenger = ProcessorRegistry.load(pipeline.get("messaging", "none"), "messaging")
+
+        self._diagnose = DiagnoseLogger(
+            self.app_name,
+            enabled=self.config.get("diagnose", True),
+        )
 
         self._frida_session = None
 
@@ -276,51 +282,113 @@ class BaseClient:
     # ═══ HTTP with processor pipeline ═══
 
     def _post(self, url: str, body: dict) -> dict:
+        path = url.replace(self._base_url, "") if self._base_url else url
+        _d = self._diagnose
+
+        t0 = time.time()
         try:
             encrypted = self._encryptor.encode(body)
         except Exception as e:
+            _d.log("POST", path, "encrypt", f"FAILED: {e}")
             raise RuntimeError(f"encryption.encode failed: {e}")
+        t1 = time.time()
+        _d.log("POST", path, "encrypt",
+               f"{self._encryptor.name} | body {len(json.dumps(body))}B -> {len(encrypted)}B",
+               (t1 - t0) * 1000)
 
         headers = dict(self._default_headers)
-        # Only set Content-Type if not already provided (check case-insensitive)
         ct_present = any(k.lower() == "content-type" for k in headers)
         if not ct_present:
             headers["Content-Type"] = "application/json; charset=utf-8"
         headers["__auth_token__"] = self._auth_token
 
+        t0 = time.time()
         headers, extra_params = self._signer.sign(url, headers, body)
+        t1 = time.time()
+        _d.log("POST", path, "sign",
+               f"{self._signer.name}", (t1 - t0) * 1000)
 
-        # Add signing params to URL query string
+        if self._auth_token:
+            _d.log("POST", path, "auth", f"token={self._auth_token[:12]}... uid={self._uid}")
+        else:
+            _d.log("POST", path, "auth", "skip (未认证)")
+
+        import urllib.parse
         if extra_params:
-            import urllib.parse
             sep = "&" if "?" in url else "?"
             url = url + sep + urllib.parse.urlencode(extra_params)
 
+        t0 = time.time()
         r = self.session.post(url, data=encrypted, headers=headers, timeout=30)
+        t1 = time.time()
         r.raise_for_status()
+        _d.log("POST", path, "send",
+               f"{r.status_code} | {len(r.content)}B", (t1 - t0) * 1000)
 
+        t0 = time.time()
         try:
-            return self._encryptor.decode(r.content)
-        except Exception:
+            decoded = self._encryptor.decode(r.content)
+        except Exception as e:
+            _d.log("POST", path, "decrypt", f"FAILED: {e}. 回退到 raw text")
             try:
-                return json.loads(r.text)
+                decoded = json.loads(r.text)
             except json.JSONDecodeError:
                 raise RuntimeError(f"decryption failed: {r.text[:200]}")
+        t1 = time.time()
+        _d.log("POST", path, "decrypt",
+               f"{self._encryptor.name} | {len(r.content)}B -> {len(json.dumps(decoded))}B",
+               (t1 - t0) * 1000)
+
+        ok = self.check_response(decoded)
+        code = decoded.get("code", "?")
+        if ok:
+            _d.log("POST", path, "business", f"code={code} | OK")
+        else:
+            msg = decoded.get("msg", decoded.get("message", ""))
+            _d.log("POST", path, "business", f"code={code} | msg={msg} | ✗ 业务错误")
+
+        return decoded
 
     def _get(self, url: str, params: dict = None) -> dict:
+        path = url.replace(self._base_url, "") if self._base_url else url
+        _d = self._diagnose
         params = dict(params or {})
+
         headers = dict(self._default_headers)
         headers["__auth_token__"] = self._auth_token
 
+        t0 = time.time()
         headers, extra_params = self._signer.sign(url, headers, params)
+        t1 = time.time()
+        _d.log("GET", path, "sign", f"{self._signer.name}", (t1 - t0) * 1000)
+
+        if self._auth_token:
+            _d.log("GET", path, "auth", f"token={self._auth_token[:12]}...")
+        else:
+            _d.log("GET", path, "auth", "skip")
+
         params.update(extra_params)
 
+        t0 = time.time()
         r = self.session.get(url, params=params, headers=headers, timeout=30)
+        t1 = time.time()
         r.raise_for_status()
+        _d.log("GET", path, "send", f"{r.status_code} | {len(r.content)}B", (t1 - t0) * 1000)
+
         try:
-            return self._encryptor.decode(r.content)
+            decoded = self._encryptor.decode(r.content)
         except Exception:
-            return json.loads(r.text)
+            _d.log("GET", path, "decrypt", "no encryption / raw JSON")
+            decoded = json.loads(r.text)
+
+        ok = self.check_response(decoded)
+        code = decoded.get("code", "?")
+        if ok:
+            _d.log("GET", path, "business", f"code={code} | OK")
+        else:
+            _d.log("GET", path, "business", f"code={code} | ✗")
+
+        return decoded
 
     # ═══ Pagination ═══
 
