@@ -566,6 +566,23 @@ class BaseClient:
         return result
 
     @staticmethod
+    def _ensure_app_running(serial: str, package: str) -> int | None:
+        """Ensure the target app is running. Restart via monkey if dead. Returns PID."""
+        from framework.bridge.adb_device import AdbDevice
+        pid = AdbDevice.get_pid(serial, package)
+        if pid:
+            return pid
+
+        import subprocess as _subprocess
+        print(f"[base_client] App {package} 未运行，尝试启动...")
+        _subprocess.run(
+            ["adb", "-s", serial, "shell", "monkey", "-p", package, "1"],
+            timeout=15, capture_output=True,
+        )
+        time.sleep(5)
+        return AdbDevice.get_pid(serial, package)
+
+    @staticmethod
     def _resolve_path(data: dict, path: str):
         parts = path.split(".")
         current = data
@@ -738,7 +755,22 @@ class BaseClient:
             try:
                 self.run_room(room, idx)
             except FridaDisconnectedError:
-                self._notify("error", "Frida 会话已断开，请重新连接设备后继续")
+                # Try recovery: restart app + reconnect once
+                rt = self._load_runtime()
+                dev = rt.get("device", {})
+                serial = dev.get("serial", "")
+                package = dev.get("app_package",
+                                  self.config.get("meta", {}).get("package", ""))
+                if serial and package:
+                    new_pid = self._ensure_app_running(serial, package)
+                    if new_pid:
+                        self._notify("info", f"App 已恢复 (PID={new_pid})，继续...")
+                        try:
+                            self.run_room(room, idx)
+                            continue
+                        except Exception:
+                            pass
+                self._notify("error", "Frida 会话已断开且无法恢复，任务暂停")
                 self.pause()
                 return
             except Exception as e:

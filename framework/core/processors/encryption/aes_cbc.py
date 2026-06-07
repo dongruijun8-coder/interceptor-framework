@@ -123,20 +123,10 @@ class AesCbcEncryption(EncryptionProcessor):
         _tmp_script = _tmp_dir / "bridge_cli.js"
         _tmp_script.write_text(script_path.read_text(encoding="utf-8"),
                                encoding="utf-8")
-        frida_cmd = (
-            f'frida -H 127.0.0.1:27042 -p {pid} '
-            f'-l "{_tmp_script}"'
-        )
+        from framework.bridge.frida_cli import FridaCLI
+        cli = FridaCLI("127.0.0.1", 27042)
         try:
-            # Use shell=True for cross-platform (bash on Unix, cmd on Windows)
-            proc = subprocess.Popen(
-                frida_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                shell=True,
-            )
+            proc = cli.launch(pid, str(_tmp_script))
         except FileNotFoundError:
             client._notify("error", "frida CLI 未安装，请确认 PATH 中包含 frida")
             return

@@ -10,7 +10,14 @@
     "device": "usb",
     "package": "com.sybl.voiceroom",
     "script": "frida_key_bridge.js",
-    "note": "Requires hluda-server (NOT frida-server). NIS anti-Frida detection."
+    "modules": [
+      {"name": "secret_key_spec", "params": {}},
+      {"name": "okhttp", "params": {}},
+      {"name": "key_export", "params": {}},
+      {"name": "messaging_rongcloud", "params": {"app_key": "m7ua80gbmdddm"}}
+    ],
+    "rpc_methods": ["getSessionKey", "getHeaders", "sendMessage", "getStatus"],
+    "note": "Requires hluda-server (NOT frida-server). NIS anti-Frida detection. modules 优先于 script。"
   },
   "server": {
     "base_url": "https://ui-api-cn.shuangyuxingqiu.com",
