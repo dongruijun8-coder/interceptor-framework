@@ -29,8 +29,9 @@ class BaseClient:
         self.app_name = self.config["meta"]["app_name"]
         self.state = StateManager(str(self.config_path.parent))
 
-        # Load processors from config
-        pipeline = self.config.get("pipeline", {})
+        # Load processors from config (支持 recipe 展开)
+        from .recipes import expand_recipe
+        pipeline = expand_recipe(self.config.get("pipeline", {}))
         self._encryptor = ProcessorRegistry.load(pipeline.get("encryption", "plaintext"), "encryption")
         self._signer = ProcessorRegistry.load(pipeline.get("signing", "plaintext"), "signing")
         self._auth_processor = ProcessorRegistry.load(pipeline.get("auth", "manual-token"), "auth")

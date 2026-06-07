@@ -217,6 +217,27 @@ def api_app_diagnose_stream(app_id):
     )
 
 
+@app.route("/api/app/<app_id>/health")
+def api_app_health(app_id):
+    """设备健康检查 — 探测 ADB、Frida、NIS、平台"""
+    task = manager.get_task(app_id)
+    if not task:
+        return jsonify({"error": "not found"}), 404
+
+    runtime = task._load_runtime()
+    device = runtime.get("device", {})
+    serial = device.get("serial", "")
+    package = device.get("app_package",
+                         task.config.get("meta", {}).get("package", ""))
+
+    if not serial or not package:
+        return jsonify({"error": "请先在 Dashboard 设置设备串号和包名"}), 400
+
+    from framework.bridge.env_checker import EnvChecker
+    result = EnvChecker.probe(serial, package)
+    return jsonify(result)
+
+
 # ═══ Account API ═══
 
 def _get_account_manager(app_id: str) -> AccountManager:
