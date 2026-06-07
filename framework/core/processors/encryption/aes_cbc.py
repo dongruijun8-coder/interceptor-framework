@@ -96,7 +96,8 @@ class AesCbcEncryption(EncryptionProcessor):
             return
 
         # ── 1. Get PID via ADB ──
-        pid = self._get_pid_via_adb(serial, package)
+        from framework.bridge.adb_device import AdbDevice
+        pid = AdbDevice.get_pid(serial, package)
         if not pid:
             # Try launching the app
             print("[aes-cbc] App not running, attempting to launch...")
@@ -105,7 +106,7 @@ class AesCbcEncryption(EncryptionProcessor):
                 timeout=15, capture_output=True,
             )
             time.sleep(5)
-            pid = self._get_pid_via_adb(serial, package)
+            pid = AdbDevice.get_pid(serial, package)
 
         if not pid:
             client._notify("error",
@@ -223,26 +224,6 @@ class AesCbcEncryption(EncryptionProcessor):
                        f"密钥捕获成功 ({len(self._key)} bytes)")
         print(f"[aes-cbc] Session key loaded via Frida CLI "
               f"({len(self._key)} bytes, IV from clientSession)")
-
-    @staticmethod
-    def _get_pid_via_adb(serial: str, package: str) -> int | None:
-        """Find process PID via ADB shell ps."""
-        try:
-            raw = subprocess.check_output(
-                ["adb", "-s", serial, "shell", "ps", "-A"],
-                timeout=10, text=True, stderr=subprocess.DEVNULL,
-            )
-            for line in raw.splitlines():
-                if package in line:
-                    parts = line.strip().split()
-                    if len(parts) >= 2:
-                        try:
-                            return int(parts[1])  # PID is 2nd column
-                        except ValueError:
-                            pass
-        except Exception:
-            pass
-        return None
 
     def encode(self, body: dict) -> bytes:
         if self._key is None:

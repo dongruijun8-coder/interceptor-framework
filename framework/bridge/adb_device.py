@@ -61,3 +61,24 @@ class AdbDevice:
             devices.append(AdbDevice(serial, status, model, android_version))
 
         return devices
+
+    @staticmethod
+    def get_pid(serial: str, package: str) -> Optional[int]:
+        """Find process PID via adb shell ps -A.
+        Works around NIS packers that hide processes from Frida."""
+        try:
+            raw = subprocess.check_output(
+                ["adb", "-s", serial, "shell", "ps", "-A"],
+                timeout=10, text=True, stderr=subprocess.DEVNULL,
+            )
+            for line in raw.splitlines():
+                if package in line:
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        try:
+                            return int(parts[1])  # PID is 2nd column
+                        except ValueError:
+                            pass
+        except Exception:
+            pass
+        return None

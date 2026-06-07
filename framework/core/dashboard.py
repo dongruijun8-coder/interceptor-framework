@@ -8,7 +8,8 @@ from pathlib import Path
 import requests
 import urllib3
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
+from queue import Empty
 
 from .account_manager import AccountManager
 from .task_manager import TaskManager
@@ -182,6 +183,38 @@ def api_app_settings(app_id):
 
     _atomic_write_json(runtime_path, runtime)
     return jsonify({"success": True})
+
+
+@app.route("/api/app/<app_id>/diagnose/stream")
+def api_app_diagnose_stream(app_id):
+    """SSE stream of diagnose events for real-time frontend display."""
+    task = manager.get_task(app_id)
+    if not task:
+        return jsonify({"error": "not found"}), 404
+
+    q = task._diagnose.subscribe()
+
+    def generate():
+        try:
+            while True:
+                try:
+                    data = q.get(timeout=15)
+                    yield f"data: {data}\n\n"
+                except Empty:
+                    yield ": heartbeat\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            task._diagnose.unsubscribe(q)
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ═══ Account API ═══
