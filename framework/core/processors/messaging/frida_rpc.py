@@ -34,8 +34,31 @@ class FridaRpcMessaging(MessagingProcessor):
 
         # 2. Fallback: Frida CLI stdin (NIS-bypass for sybl etc.)
         cli_proc = getattr(client, '_frida_cli_proc', None)
-        if cli_proc is not None and cli_proc.poll() is None:
-            return self._send_via_cli(client, uid, text)
+        if cli_proc is not None:
+            # Re-launch if process died
+            if cli_proc.poll() is not None:
+                print("[frida-rpc] CLI process dead, re-launching...")
+                from framework.core.processors.encryption.aes_cbc import AesCbcEncryption
+                # Re-launch via _derive_from_frida's launch helper
+                # Quick: just call _launch_frida_cli
+                script_path = client.config_path.parent / "bridge_cli.js"
+                if not script_path.exists():
+                    script_path = client.config_path.parent / "frida_key_bridge.js"
+                if script_path.exists():
+                    rt = client._load_runtime()
+                    dev = rt.get("device", {})
+                    serial = dev.get("serial", "")
+                    from framework.bridge.adb_device import AdbDevice
+                    pid = AdbDevice.get_pid(serial,
+                        dev.get("app_package", client.config.get("meta",{}).get("package","")))
+                    if pid:
+                        new_proc = client._encryptor._launch_frida_cli(pid, script_path)
+                        if new_proc:
+                            client._encryptor._start_cli_monitor(new_proc, client)
+                            cli_proc = new_proc
+
+            if cli_proc is not None and cli_proc.poll() is None:
+                return self._send_via_cli(client, uid, text)
 
         return {"success": False, "error": "Frida 会话未初始化 — 请先扫描房间获取密钥"}
 
