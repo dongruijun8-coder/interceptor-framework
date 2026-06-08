@@ -115,7 +115,8 @@ class AesCbcEncryption(EncryptionProcessor):
 
         print(f"[aes-cbc] App PID={pid}, launching Frida CLI...")
 
-        # ── 2. Launch Frida CLI via bash (NOT cmd.exe — bash pipe supports select) ──
+        # ── 2. Launch Frida CLI ──
+        # Copy script to temp (avoid Chinese path issues)
         import tempfile as _tempfile
         _tmp_dir = Path(_tempfile.gettempdir()) / "sybl_frida"
         _tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -123,69 +124,78 @@ class AesCbcEncryption(EncryptionProcessor):
         _tmp_script.write_text(script_path.read_text(encoding="utf-8"),
                                encoding="utf-8")
 
-        # Use bash -c like the working pipeline (MSYS2/Git Bash)
-        cmd = (f"MSYS_NO_PATHCONV=1 frida -H 127.0.0.1:27042 "
-               f"-p {pid} -l \"{_tmp_script}\"")
+        cmd = f'frida -H 127.0.0.1:27042 -p {pid} -l "{_tmp_script}"'
         try:
             proc = subprocess.Popen(
-                ["bash", "-c", cmd],
+                cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                shell=True,
             )
         except FileNotFoundError:
-            client._notify("error", "bash 未找到，请安装 Git Bash 或 MSYS2")
+            client._notify("error", "frida CLI 未安装，请确认 PATH 中包含 frida")
             return
 
-        # ── 3. Non-blocking read via select.select() (works in bash, not cmd.exe) ──
-        import select
+        # ── 3. Threaded reader — Windows select() doesn't work on pipes ──
+        import threading
+        import queue
         client._notify("info", "等待密钥... Frida CLI 已启动")
+        line_queue = queue.Queue()
+
+        def _read_frida_stdout():
+            try:
+                for line in iter(proc.stdout.readline, ''):
+                    line_queue.put(line)
+            except Exception:
+                pass
+            finally:
+                line_queue.put(None)  # sentinel
+
+        reader_t = threading.Thread(target=_read_frida_stdout, daemon=True)
+        reader_t.start()
+
         deadline = time.time() + 30
         key_data = None
         hooks_ready = False
-        remaining = ""
 
         while time.time() < deadline:
-            readable, _, _ = select.select([proc.stdout], [], [], 0.5)
-            if proc.stdout in readable:
-                chunk = proc.stdout.read(4096)
-                if not chunk:
-                    if proc.poll() is not None:
-                        break
-                    continue
-                remaining += chunk
-                # Process complete lines
-                while "\n" in remaining:
-                    line, remaining = remaining.split("\n", 1)
-                    line = line.strip()
-                    if not line:
-                        continue
-                    print(f"[aes-cbc] {line[:120]}")
-
-                    if not hooks_ready and ("Ready" in line or "Hooks installed" in line):
-                        hooks_ready = True
-                        print("[aes-cbc] Hooks ready, tapping screen...")
-                        for i in range(5):
-                            subprocess.run(
-                                ["adb", "-s", serial, "shell", "input", "tap",
-                                 str(400 + i * 40), str(500 + i * 20)],
-                                timeout=5, capture_output=True,
-                            )
-                            time.sleep(0.5)
-
-                    if "KEY_JSON:" in line:
-                        try:
-                            key_data = json.loads(line.split("KEY_JSON: ", 1)[1])
-                            break
-                        except json.JSONDecodeError:
-                            pass
-                if key_data:
+            try:
+                line = line_queue.get(timeout=0.5)
+            except queue.Empty:
+                if proc.poll() is not None:
                     break
+                continue
 
-            if proc.poll() is not None:
-                stderr = proc.stderr.read()
-                print(f"[aes-cbc] Frida CLI exited: {stderr[:200]}")
+            if line is None:  # sentinel — stdout closed
                 break
+
+            line = line.strip()
+            if not line:
+                continue
+            print(f"[aes-cbc] {line[:120]}")
+
+            if not hooks_ready and ("Ready" in line or "Hooks installed" in line):
+                hooks_ready = True
+                print("[aes-cbc] Hooks ready, tapping screen...")
+                for i in range(5):
+                    subprocess.run(
+                        ["adb", "-s", serial, "shell", "input", "tap",
+                         str(400 + i * 40), str(500 + i * 20)],
+                        timeout=5, capture_output=True,
+                    )
+                    time.sleep(0.5)
+
+            if "KEY_JSON:" in line:
+                try:
+                    key_data = json.loads(line.split("KEY_JSON: ", 1)[1])
+                    break
+                except json.JSONDecodeError:
+                    pass
+
+        if proc.poll() is not None and not key_data:
+            stderr = proc.stderr.read()
+            print(f"[aes-cbc] Frida CLI exited: {stderr[:200]}")
 
         if not key_data:
             client._notify("error",
