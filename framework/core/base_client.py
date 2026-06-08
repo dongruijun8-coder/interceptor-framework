@@ -47,6 +47,7 @@ class BaseClient:
         self.session = requests.Session()
         self.session.verify = False
         self._authenticated = False
+        self._frida_authenticated = False
         self._auth_token = self.config.get("auth_token", "")
         self._uid = str(self.config.get("uid", ""))
         self._session_id = self.config.get("client_session", "")
