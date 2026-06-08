@@ -60,31 +60,33 @@ def api_start(app_id):
         return jsonify({"error": "not found"}), 404
 
     # If messaging is frida-rpc, try to set up Frida session
-    frida_skipped = False
     if task._messenger.name == "frida-rpc":
-        runtime_path = APPS_DIR / app_id / "runtime.json"
-        if runtime_path.exists():
-            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-            device_cfg = runtime.get("device", {})
-            serial = device_cfg.get("serial", "")
-            app_package = device_cfg.get("app_package", "")
-            script_name = device_cfg.get("script_name", "hook_send_msg.js")
+        # Already have CLI-based Frida connection (NIS bypass for sybl etc.)
+        if getattr(task, '_frida_cli_proc', None) is not None:
+            pass  # Use CLI stdin messaging — no Python binding needed
+        else:
+            runtime_path = APPS_DIR / app_id / "runtime.json"
+            if runtime_path.exists():
+                runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+                device_cfg = runtime.get("device", {})
+                serial = device_cfg.get("serial", "")
+                app_package = device_cfg.get("app_package", "")
+                script_name = device_cfg.get("script_name", "hook_send_msg.js")
 
-            if serial and app_package:
-                script_path = str(APPS_DIR / app_id / script_name)
-                from framework.bridge.frida_session import FridaSessionManager
-                try:
-                    session_mgr = FridaSessionManager()
-                    session = session_mgr.get_or_create(
-                        app_id, serial, app_package, script_path
-                    )
-                    task.set_frida_session(session)
-                except RuntimeError as e:
-                    return jsonify({"success": False, "error": str(e)}), 500
-                except Exception as e:
-                    return jsonify({"success": False, "error": f"Frida 初始化失败: {e}"}), 500
-            else:
-                frida_skipped = True  # No device configured, will fail at send time
+                if serial and app_package:
+                    script_path = str(APPS_DIR / app_id / script_name)
+                    from framework.bridge.frida_session import FridaSessionManager
+                    try:
+                        session_mgr = FridaSessionManager()
+                        session = session_mgr.get_or_create(
+                            app_id, serial, app_package, script_path
+                        )
+                        task.set_frida_session(session)
+                    except RuntimeError as e:
+                        # Python binding might be blocked (NIS) — CLI fallback handles this
+                        print(f"[dashboard] Frida Python binding failed (will use CLI): {e}")
+                    except Exception as e:
+                        print(f"[dashboard] Frida init warning: {e}")
 
     ok = manager.start(app_id)
     return jsonify({"success": ok})
