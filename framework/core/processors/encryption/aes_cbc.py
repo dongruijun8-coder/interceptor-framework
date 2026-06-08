@@ -70,6 +70,49 @@ class AesCbcEncryption(EncryptionProcessor):
         self._key = hashlib.sha256(seed.encode()).digest()
         self._iv = seed.replace("-", "")[:16].encode() if len(seed.replace("-", "")) >= 16 else b"FCE3F1A4-5DC3-41"
 
+    def _launch_frida_cli(self, pid: int, script_path: Path) -> subprocess.Popen | None:
+        """Launch Frida CLI, return Popen with stdin/stdout pipes + msg_queue."""
+        import tempfile as _tempfile
+        _tmp_dir = Path(_tempfile.gettempdir()) / "sybl_frida"
+        _tmp_dir.mkdir(parents=True, exist_ok=True)
+        _tmp_script = _tmp_dir / "bridge_cli.js"
+        _tmp_script.write_text(script_path.read_text(encoding="utf-8"),
+                               encoding="utf-8")
+
+        cmd = f'frida -H 127.0.0.1:27042 -p {pid} -l "{_tmp_script}"'
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                shell=True,
+            )
+        except FileNotFoundError:
+            print("[aes-cbc] frida CLI not found in PATH")
+            return None
+        return proc
+
+    def _start_cli_monitor(self, proc, client):
+        """Start background thread reading Frida CLI stdout, pushing [MSG_SENT] to queue."""
+        import threading, queue
+        msg_queue = queue.Queue()
+        client._frida_msg_queue = msg_queue
+        client._frida_cli_proc = proc
+
+        def _monitor():
+            try:
+                for line in iter(proc.stdout.readline, ''):
+                    if "[MSG_SENT]" in line:
+                        msg_queue.put(line)
+            except Exception:
+                pass
+        threading.Thread(target=_monitor, daemon=True).start()
+
+        # Clear any initial output (attach banner, hooks installed, etc.)
+        time.sleep(2)
+
     def _derive_from_frida(self, client) -> None:
         """Fetch AES key via Frida CLI subprocess (bypasses NIS anti-Frida).
 
@@ -121,6 +164,17 @@ class AesCbcEncryption(EncryptionProcessor):
                         client._auth_token = cached["headers"]["Token"]
                     client._frida_authenticated = True
                     client._notify("info", f"复用缓存的密钥 (PID={pid})")
+
+                    # Still need Frida CLI for messaging (frida-rpc)
+                    if client._messenger.name == "frida-rpc":
+                        script_path = client.config_path.parent / "bridge_cli.js"
+                        if not script_path.exists():
+                            script_path = client.config_path.parent / "frida_key_bridge.js"
+                        if script_path.exists():
+                            cli_proc = self._launch_frida_cli(pid, script_path)
+                            if cli_proc:
+                                self._start_cli_monitor(cli_proc, client)
+                                client._notify("info", "Frida CLI 已启动 (消息通道)")
                     return
             except Exception:
                 pass
@@ -133,41 +187,26 @@ class AesCbcEncryption(EncryptionProcessor):
             print(f"[aes-cbc] No Frida script found in {client.config_path.parent}")
             return
 
-        print(f"[aes-cbc] App PID={pid}, launching Frida CLI...")
+        # ── 2. Launch Frida CLI (used for both key capture and messaging) ──
+        proc = self._launch_frida_cli(pid, script_path)
+        if proc is None:
+            return  # error already notified
 
-        # ── 2. Launch Frida CLI ──
-        # Copy script to temp (avoid Chinese path issues)
-        import tempfile as _tempfile
-        _tmp_dir = Path(_tempfile.gettempdir()) / "sybl_frida"
-        _tmp_dir.mkdir(parents=True, exist_ok=True)
-        _tmp_script = _tmp_dir / "bridge_cli.js"
-        _tmp_script.write_text(script_path.read_text(encoding="utf-8"),
-                               encoding="utf-8")
-
-        cmd = f'frida -H 127.0.0.1:27042 -p {pid} -l "{_tmp_script}"'
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                shell=True,
-            )
-        except FileNotFoundError:
-            client._notify("error", "frida CLI 未安装，请确认 PATH 中包含 frida")
-            return
-
-        # ── 3. Threaded reader — Windows select() doesn't work on pipes ──
+        # ── 3. Threaded reader (feeds both key capture + msg queue) ──
         import threading
         import queue
         client._notify("info", "等待密钥... Frida CLI 已启动")
         line_queue = queue.Queue()
+        msg_queue = queue.Queue()
+        client._frida_msg_queue = msg_queue
+        client._frida_cli_proc = proc
 
         def _read_frida_stdout():
             try:
                 for line in iter(proc.stdout.readline, ''):
                     line_queue.put(line)
+                    if "[MSG_SENT]" in line:
+                        msg_queue.put(line)
             except Exception:
                 pass
             finally:
@@ -262,21 +301,6 @@ class AesCbcEncryption(EncryptionProcessor):
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cache_file.write_text(json.dumps(key_data, ensure_ascii=False, indent=2))
 
-        # ── 6. Start message monitor (reads stdout for [MSG_SENT]) ──
-        msg_queue = queue.Queue()
-        client._frida_msg_queue = msg_queue
-
-        def _monitor():
-            try:
-                for line in iter(proc.stdout.readline, ''):
-                    line_queue.put(line)
-                    if "[MSG_SENT]" in line:
-                        msg_queue.put(line)
-            except Exception:
-                pass
-        threading.Thread(target=_monitor, daemon=True).start()
-
-        client._frida_cli_proc = proc
         client._frida_cli_script = str(script_path)
 
         client._notify("info",
