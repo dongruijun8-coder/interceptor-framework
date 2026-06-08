@@ -119,6 +119,7 @@ class AesCbcEncryption(EncryptionProcessor):
                             client._default_headers[hk] = cached["headers"][hk]
                     if "Token" in cached.get("headers", {}):
                         client._auth_token = cached["headers"]["Token"]
+                    client._frida_authenticated = True
                     client._notify("info", f"复用缓存的密钥 (PID={pid})")
                     return
             except Exception:
@@ -252,6 +253,7 @@ class AesCbcEncryption(EncryptionProcessor):
         # Store Token for auth flow
         if "Token" in headers:
             client._auth_token = headers["Token"]
+        client._frida_authenticated = True  # mark: token from live Frida session
 
         # ── 5. Cache key + PID for reuse ──
         key_data["pid"] = pid

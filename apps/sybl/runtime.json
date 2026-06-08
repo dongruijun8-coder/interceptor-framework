@@ -6,7 +6,7 @@
   "device": {
     "serial": "127.0.0.1:7555",
     "app_package": "com.sybl.voiceroom",
-    "script_name": "frida_key_bridge.js"
+    "script_name": "bridge_cli.js"
   },
   "settings": {},
   "data_sources": {
