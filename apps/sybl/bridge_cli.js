@@ -1,4 +1,5 @@
-// CLI-compatible bridge: writes key to file, exports RPC for messaging
+// CLI-compatible bridge: captures AES key, sends messages via fire-and-forget
+// Rate limiting handled by Python layer (FridaCliSession.send_message)
 var sessionKey = null;
 var sessionIV = null;
 var sessionHeaders = {};
@@ -7,7 +8,7 @@ var rongIMClient = null;
 var keyWritten = false;
 
 Java.perform(function() {
-    // 1. Capture Key — allow key rotation (B5 fix: clear keyWritten on new key)
+    // 1. Capture Key — allow key rotation
     var SKS = Java.use("javax.crypto.spec.SecretKeySpec");
     SKS.$init.overload('[B', 'java.lang.String').implementation = function(kb, algo) {
         if (algo.indexOf("AES") >= 0 && kb.length === 32) {
@@ -44,7 +45,7 @@ Java.perform(function() {
 
     console.log("[bridge] Hooks installed. Waiting for encryption...");
 
-    // 5. Watch for key and write to file
+    // 5. Watch for key
     setInterval(function() {
         if (sessionKey && !keyWritten) {
             keyWritten = true;
@@ -61,7 +62,7 @@ Java.perform(function() {
 });
 
 // Global _sendMsg — callable from Frida CLI REPL (stdin)
-// Usage: _sendMsg("uid", "text")
+// Returns immediately after sendMessage() call; rate limiting in Python
 function _sendMsg(targetUid, text) {
     Java.perform(function() {
         try {
@@ -76,7 +77,7 @@ function _sendMsg(targetUid, text) {
     });
 }
 
-// RPC exports for sendMessage (for Python Frida binding — non-NIS apps)
+// RPC exports — for Python Frida binding (non-NIS apps)
 rpc.exports = {
     sendMessage: function(targetUid, text) {
         var result = {};

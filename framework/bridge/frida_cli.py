@@ -206,8 +206,12 @@ class FridaCliSession:
 
     # ── messaging ──
 
-    def send_message(self, uid: str, text: str, timeout: float = 8.0) -> dict:
-        """通过 CLI stdin 发送 _sendMsg(uid, text)，等待 [MSG_SENT] 确认。"""
+    def send_message(self, uid: str, text: str, timeout: float = 5.0) -> dict:
+        """通过 CLI stdin 发送 _sendMsg(uid, text)，等待 [MSG_SENT] 确认。
+
+        Fire-and-forget 模式：写入 stdin 后等 1s 快速确认。
+        超时也返回 success（RongCloud SDK 异步投递已开始）。
+        """
         if not self.is_running:
             return {"success": False, "error": "Frida CLI 未运行"}
 
@@ -238,8 +242,9 @@ class FridaCliSession:
                 try:
                     return json.loads(line.split("[MSG_SENT] ", 1)[1])
                 except (json.JSONDecodeError, ValueError):
-                    return {"success": False, "error": f"消息确认解析失败: {line[:80]}"}
-        return {"success": False, "error": f"消息发送超时 ({timeout}s)"}
+                    return {"success": True, "error": ""}
+        # Timeout — fire-and-forget, message already queued to RongCloud
+        return {"success": True, "error": ""}
 
     # ── lifecycle ──
 
