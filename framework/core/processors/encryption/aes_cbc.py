@@ -73,8 +73,7 @@ class AesCbcEncryption(EncryptionProcessor):
     def _derive_from_frida(self, client) -> None:
         """Fetch AES key via Frida CLI subprocess (bypasses NIS anti-Frida).
 
-        Python Frida binding is detected by NIS → Java bridge blocked.
-        Frida CLI (frida -H host:port) is NOT detected.
+        Caches key per PID — if PID unchanged, reuses cached key+headers.
         """
         rt = client._load_runtime()
         device = rt.get("device", {})
@@ -86,20 +85,10 @@ class AesCbcEncryption(EncryptionProcessor):
             print("[aes-cbc] No device configured, skipping session_key derivation")
             return
 
-        # Use bridge_cli.js (SecretKeySpec hooks + RPC exports)
-        script_path = client.config_path.parent / "bridge_cli.js"
-        if not script_path.exists():
-            # Fallback to frida_key_bridge.js
-            script_path = client.config_path.parent / "frida_key_bridge.js"
-        if not script_path.exists():
-            print(f"[aes-cbc] No Frida script found in {client.config_path.parent}")
-            return
-
-        # ── 1. Get PID via ADB ──
+        # ── 1. Get PID + check cache ──
         from framework.bridge.adb_device import AdbDevice
         pid = AdbDevice.get_pid(serial, package)
         if not pid:
-            # Try launching the app
             print("[aes-cbc] App not running, attempting to launch...")
             subprocess.run(
                 ["adb", "-s", serial, "shell", "monkey", "-p", package, "1"],
@@ -111,6 +100,36 @@ class AesCbcEncryption(EncryptionProcessor):
         if not pid:
             client._notify("error",
                            f"找不到进程 {package}，请手动打开 App")
+            return
+
+        # Check cache: same PID = same session = same key
+        cache_file = client.config_path.parent / ".state" / "last_key.json"
+        if cache_file.exists():
+            try:
+                cached = json.loads(cache_file.read_text(encoding="utf-8"))
+                if cached.get("pid") == pid and cached.get("key_hex"):
+                    print(f"[aes-cbc] Reusing cached key (PID={pid} unchanged)")
+                    self._key = bytes.fromhex(cached["key_hex"])
+                    cs = cached.get("headers", {}).get("clientSession", "")
+                    if cs and len(cs) >= 16:
+                        self._iv = cs[:16].encode("utf-8")
+                    for hk in ("deviceToken", "SMDeviceId", "DeviceId",
+                                "clientSession", "Token"):
+                        if hk in cached.get("headers", {}):
+                            client._default_headers[hk] = cached["headers"][hk]
+                    if "Token" in cached.get("headers", {}):
+                        client._auth_token = cached["headers"]["Token"]
+                    client._notify("info", f"复用缓存的密钥 (PID={pid})")
+                    return
+            except Exception:
+                pass
+
+        # Use bridge_cli.js (SecretKeySpec hooks + RPC exports)
+        script_path = client.config_path.parent / "bridge_cli.js"
+        if not script_path.exists():
+            script_path = client.config_path.parent / "frida_key_bridge.js"
+        if not script_path.exists():
+            print(f"[aes-cbc] No Frida script found in {client.config_path.parent}")
             return
 
         print(f"[aes-cbc] App PID={pid}, launching Frida CLI...")
@@ -234,8 +253,13 @@ class AesCbcEncryption(EncryptionProcessor):
         if "Token" in headers:
             client._auth_token = headers["Token"]
 
-        # ── 5. Store Frida process for messaging RPC ──
-        # Save as (proc, script_path) tuple for frida-rpc processor
+        # ── 5. Cache key + PID for reuse ──
+        key_data["pid"] = pid
+        cache_file = client.config_path.parent / ".state" / "last_key.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps(key_data, ensure_ascii=False, indent=2))
+
+        # ── 6. Store Frida process for messaging RPC ──
         client._frida_cli_proc = proc
         client._frida_cli_script = str(script_path)
 
