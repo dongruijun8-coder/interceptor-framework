@@ -55,7 +55,23 @@ Java.perform(function() {
     console.log("[bridge] Ready.");
 });
 
-// RPC exports for sendMessage
+// Global _sendMsg — callable from Frida CLI REPL (stdin)
+// Usage: _sendMsg("uid", "text")
+function _sendMsg(targetUid, text) {
+    Java.perform(function() {
+        try {
+            if (!rongIMClient) rongIMClient = Java.use("io.rong.imlib.RongIMClient").getInstance();
+            var msg = Java.use("io.rong.message.TextMessage").$new(text);
+            var conv = Java.use("io.rong.imlib.model.Conversation$ConversationType").valueOf("PRIVATE");
+            rongIMClient.sendMessage(conv, targetUid.toString(), msg, null, null, null);
+            console.log("[MSG_SENT] " + JSON.stringify({success: true, uid: targetUid, text: text}));
+        } catch(e) {
+            console.log("[MSG_SENT] " + JSON.stringify({success: false, error: e.toString()}));
+        }
+    });
+}
+
+// RPC exports for sendMessage (for Python Frida binding — non-NIS apps)
 rpc.exports = {
     sendMessage: function(targetUid, text) {
         var result = {};

@@ -1,4 +1,7 @@
-"""Frida RPC 私信 — 通过注入的 Frida 脚本发送消息"""
+"""Frida RPC 私信 — Python binding (non-NIS) or CLI stdin (NIS bypass)"""
+import json
+import time
+
 from ..base import MessagingProcessor
 from ...processor_registry import ProcessorRegistry
 from framework.bridge.frida_session import FridaDisconnectedError
@@ -21,15 +24,51 @@ class FridaRpcMessaging(MessagingProcessor):
         }
 
     def send(self, client, uid: str, text: str) -> dict:
-        """Call rpc.exports.sendMessage(uid, text) via the pre-established Frida session."""
+        # 1. Try Python Frida binding session (non-NIS apps)
         session = getattr(client, '_frida_session', None)
-        if session is None:
-            return {"success": False, "error": "Frida 会话未初始化"}
+        if session is not None and session.is_connected:
+            try:
+                return session.send_message(uid, text)
+            except FridaDisconnectedError:
+                raise
+
+        # 2. Fallback: Frida CLI stdin (NIS-bypass for sybl etc.)
+        cli_proc = getattr(client, '_frida_cli_proc', None)
+        if cli_proc is not None and cli_proc.poll() is None:
+            return self._send_via_cli(client, uid, text)
+
+        return {"success": False, "error": "Frida 会话未初始化 — 请先扫描房间获取密钥"}
+
+    def _send_via_cli(self, client, uid: str, text: str) -> dict:
+        """Actual implementation: write to CLI stdin, read from msg_queue."""
+        import queue
+        proc = client._frida_cli_proc
+        msg_queue = getattr(client, '_frida_msg_queue', None)
+        if msg_queue is None:
+            return {"success": False, "error": "Frida CLI 消息队列未就绪"}
 
         try:
-            return session.send_message(uid, text)
-        except FridaDisconnectedError:
-            raise  # Re-raise — BaseClient.run_room catches this to stop pipeline
+            escaped = text.replace('\\', '\\\\').replace('"', '\\"')
+            cmd = f'_sendMsg("{uid}", "{escaped}");\n'
+            proc.stdin.write(cmd)
+            proc.stdin.flush()
+        except Exception as e:
+            return {"success": False, "error": f"CLI stdin 写入失败: {e}"}
+
+        deadline = time.time() + 8
+        while time.time() < deadline:
+            try:
+                line = msg_queue.get(timeout=1.0)
+            except queue.Empty:
+                if proc.poll() is not None:
+                    return {"success": False, "error": "Frida CLI 已退出"}
+                continue
+            if "[MSG_SENT]" in line:
+                try:
+                    return json.loads(line.split("[MSG_SENT] ", 1)[1])
+                except json.JSONDecodeError:
+                    return {"success": True, "error": ""}
+        return {"success": False, "error": "CLI 消息发送超时"}
 
     def validate(self, client) -> tuple:
         warnings = []

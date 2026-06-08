@@ -148,6 +148,7 @@ class AesCbcEncryption(EncryptionProcessor):
         try:
             proc = subprocess.Popen(
                 cmd,
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -261,7 +262,20 @@ class AesCbcEncryption(EncryptionProcessor):
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cache_file.write_text(json.dumps(key_data, ensure_ascii=False, indent=2))
 
-        # ── 6. Store Frida process for messaging RPC ──
+        # ── 6. Start message monitor (reads stdout for [MSG_SENT]) ──
+        msg_queue = queue.Queue()
+        client._frida_msg_queue = msg_queue
+
+        def _monitor():
+            try:
+                for line in iter(proc.stdout.readline, ''):
+                    line_queue.put(line)
+                    if "[MSG_SENT]" in line:
+                        msg_queue.put(line)
+            except Exception:
+                pass
+        threading.Thread(target=_monitor, daemon=True).start()
+
         client._frida_cli_proc = proc
         client._frida_cli_script = str(script_path)
 
