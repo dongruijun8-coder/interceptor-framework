@@ -10,8 +10,7 @@
   },
   "settings": {},
   "data_sources": {
-    "逍遥榜": "carefree",
-    "财富榜": "rich",
+    "贡献榜": "rich",
     "魅力榜": "charm",
     "守护榜": "guard"
   },
