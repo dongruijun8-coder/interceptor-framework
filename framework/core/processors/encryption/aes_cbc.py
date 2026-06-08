@@ -115,58 +115,77 @@ class AesCbcEncryption(EncryptionProcessor):
 
         print(f"[aes-cbc] App PID={pid}, launching Frida CLI...")
 
-        # ── 2. Launch Frida CLI ──
-        # Copy script to temp to avoid Chinese path issues with shell=True
+        # ── 2. Launch Frida CLI via bash (NOT cmd.exe — bash pipe supports select) ──
         import tempfile as _tempfile
         _tmp_dir = Path(_tempfile.gettempdir()) / "sybl_frida"
         _tmp_dir.mkdir(parents=True, exist_ok=True)
         _tmp_script = _tmp_dir / "bridge_cli.js"
         _tmp_script.write_text(script_path.read_text(encoding="utf-8"),
                                encoding="utf-8")
-        from framework.bridge.frida_cli import FridaCLI
-        cli = FridaCLI("127.0.0.1", 27042)
+
+        # Use bash -c like the working pipeline (MSYS2/Git Bash)
+        cmd = (f"MSYS_NO_PATHCONV=1 frida -H 127.0.0.1:27042 "
+               f"-p {pid} -l \"{_tmp_script}\"")
         try:
-            proc = cli.launch(pid, str(_tmp_script))
+            proc = subprocess.Popen(
+                ["bash", "-c", cmd],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
         except FileNotFoundError:
-            client._notify("error", "frida CLI 未安装，请确认 PATH 中包含 frida")
+            client._notify("error", "bash 未找到，请安装 Git Bash 或 MSYS2")
             return
 
-        # ── 3. Wait for hooks ready + trigger encryption ──
+        # ── 3. Non-blocking read via select.select() (works in bash, not cmd.exe) ──
+        import select
         client._notify("info", "等待密钥... Frida CLI 已启动")
         deadline = time.time() + 30
         key_data = None
         hooks_ready = False
+        remaining = ""
 
         while time.time() < deadline:
-            line = proc.stdout.readline()
-            if line:
-                print(f"[aes-cbc] {line.strip()[:120]}")
-                # Wait for hooks before tapping
-                if not hooks_ready and ("Ready" in line or "Hooks installed" in line):
-                    hooks_ready = True
-                    print("[aes-cbc] Hooks ready, tapping screen...")
-                    # Tap to trigger network requests
-                    for i in range(5):
-                        subprocess.run(
-                            ["adb", "-s", serial, "shell", "input", "tap",
-                             str(400 + i * 40), str(500 + i * 20)],
-                            timeout=5, capture_output=True,
-                        )
-                        time.sleep(0.5)
-
-                if "KEY_JSON:" in line:
-                    try:
-                        key_data = json.loads(line.split("KEY_JSON: ", 1)[1])
+            readable, _, _ = select.select([proc.stdout], [], [], 0.5)
+            if proc.stdout in readable:
+                chunk = proc.stdout.read(4096)
+                if not chunk:
+                    if proc.poll() is not None:
                         break
-                    except json.JSONDecodeError:
-                        pass
-            elif proc.poll() is not None:
-                # Process exited
+                    continue
+                remaining += chunk
+                # Process complete lines
+                while "\n" in remaining:
+                    line, remaining = remaining.split("\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    print(f"[aes-cbc] {line[:120]}")
+
+                    if not hooks_ready and ("Ready" in line or "Hooks installed" in line):
+                        hooks_ready = True
+                        print("[aes-cbc] Hooks ready, tapping screen...")
+                        for i in range(5):
+                            subprocess.run(
+                                ["adb", "-s", serial, "shell", "input", "tap",
+                                 str(400 + i * 40), str(500 + i * 20)],
+                                timeout=5, capture_output=True,
+                            )
+                            time.sleep(0.5)
+
+                    if "KEY_JSON:" in line:
+                        try:
+                            key_data = json.loads(line.split("KEY_JSON: ", 1)[1])
+                            break
+                        except json.JSONDecodeError:
+                            pass
+                if key_data:
+                    break
+
+            if proc.poll() is not None:
                 stderr = proc.stderr.read()
-                print(f"[aes-cbc] Frida CLI exited prematurely: {stderr[:200]}")
+                print(f"[aes-cbc] Frida CLI exited: {stderr[:200]}")
                 break
-            else:
-                time.sleep(0.2)
 
         if not key_data:
             client._notify("error",
