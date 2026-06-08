@@ -2,7 +2,6 @@
 import base64
 import json
 import re
-import subprocess
 import time
 from pathlib import Path
 
@@ -10,6 +9,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
 from ..base import EncryptionProcessor
+from framework.bridge.frida_cli import FridaCliSession
 
 
 class AesCbcEncryption(EncryptionProcessor):
@@ -70,54 +70,17 @@ class AesCbcEncryption(EncryptionProcessor):
         self._key = hashlib.sha256(seed.encode()).digest()
         self._iv = seed.replace("-", "")[:16].encode() if len(seed.replace("-", "")) >= 16 else b"FCE3F1A4-5DC3-41"
 
-    def _launch_frida_cli(self, pid: int, script_path: Path) -> subprocess.Popen | None:
-        """Launch Frida CLI, return Popen with stdin/stdout pipes + msg_queue."""
-        import tempfile as _tempfile
-        _tmp_dir = Path(_tempfile.gettempdir()) / "sybl_frida"
-        _tmp_dir.mkdir(parents=True, exist_ok=True)
-        _tmp_script = _tmp_dir / "bridge_cli.js"
-        _tmp_script.write_text(script_path.read_text(encoding="utf-8"),
-                               encoding="utf-8")
-
-        cmd = f'frida -H 127.0.0.1:27042 -p {pid} -l "{_tmp_script}"'
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                shell=True,
-            )
-        except FileNotFoundError:
-            print("[aes-cbc] frida CLI not found in PATH")
-            return None
-        return proc
-
-    def _start_cli_monitor(self, proc, client):
-        """Start background thread reading Frida CLI stdout, pushing [MSG_SENT] to queue."""
-        import threading, queue
-        msg_queue = queue.Queue()
-        client._frida_msg_queue = msg_queue
-        client._frida_cli_proc = proc
-
-        def _monitor():
-            try:
-                for line in iter(proc.stdout.readline, ''):
-                    if "[MSG_SENT]" in line:
-                        msg_queue.put(line)
-            except Exception:
-                pass
-        threading.Thread(target=_monitor, daemon=True).start()
-
-        # Clear any initial output (attach banner, hooks installed, etc.)
-        time.sleep(2)
+    # ═══ Frida session_key derivation ═══
 
     def _derive_from_frida(self, client) -> None:
         """Fetch AES key via Frida CLI subprocess (bypasses NIS anti-Frida).
 
         Caches key per PID — if PID unchanged, reuses cached key+headers.
+        Also launches Frida CLI for frida-rpc messaging regardless of cache.
         """
+        import subprocess as _subprocess
+        from framework.bridge.adb_device import AdbDevice
+
         rt = client._load_runtime()
         device = rt.get("device", {})
         serial = device.get("serial", "")
@@ -128,12 +91,11 @@ class AesCbcEncryption(EncryptionProcessor):
             print("[aes-cbc] No device configured, skipping session_key derivation")
             return
 
-        # ── 1. Get PID + check cache ──
-        from framework.bridge.adb_device import AdbDevice
+        # ── 1. Get PID ──
         pid = AdbDevice.get_pid(serial, package)
         if not pid:
             print("[aes-cbc] App not running, attempting to launch...")
-            subprocess.run(
+            _subprocess.run(
                 ["adb", "-s", serial, "shell", "monkey", "-p", package, "1"],
                 timeout=15, capture_output=True,
             )
@@ -145,41 +107,7 @@ class AesCbcEncryption(EncryptionProcessor):
                            f"找不到进程 {package}，请手动打开 App")
             return
 
-        # Check cache: same PID = same session = same key
-        cache_file = client.config_path.parent / ".state" / "last_key.json"
-        if cache_file.exists():
-            try:
-                cached = json.loads(cache_file.read_text(encoding="utf-8"))
-                if cached.get("pid") == pid and cached.get("key_hex"):
-                    print(f"[aes-cbc] Reusing cached key (PID={pid} unchanged)")
-                    self._key = bytes.fromhex(cached["key_hex"])
-                    cs = cached.get("headers", {}).get("clientSession", "")
-                    if cs and len(cs) >= 16:
-                        self._iv = cs[:16].encode("utf-8")
-                    for hk in ("deviceToken", "SMDeviceId", "DeviceId",
-                                "clientSession", "Token"):
-                        if hk in cached.get("headers", {}):
-                            client._default_headers[hk] = cached["headers"][hk]
-                    if "Token" in cached.get("headers", {}):
-                        client._auth_token = cached["headers"]["Token"]
-                    client._frida_authenticated = True
-                    client._notify("info", f"复用缓存的密钥 (PID={pid})")
-
-                    # Still need Frida CLI for messaging (frida-rpc)
-                    if client._messenger.name == "frida-rpc":
-                        script_path = client.config_path.parent / "bridge_cli.js"
-                        if not script_path.exists():
-                            script_path = client.config_path.parent / "frida_key_bridge.js"
-                        if script_path.exists():
-                            cli_proc = self._launch_frida_cli(pid, script_path)
-                            if cli_proc:
-                                self._start_cli_monitor(cli_proc, client)
-                                client._notify("info", "Frida CLI 已启动 (消息通道)")
-                    return
-            except Exception:
-                pass
-
-        # Use bridge_cli.js (SecretKeySpec hooks + RPC exports)
+        # Script path: bridge_cli.js preferred, frida_key_bridge.js fallback
         script_path = client.config_path.parent / "bridge_cli.js"
         if not script_path.exists():
             script_path = client.config_path.parent / "frida_key_bridge.js"
@@ -187,126 +115,96 @@ class AesCbcEncryption(EncryptionProcessor):
             print(f"[aes-cbc] No Frida script found in {client.config_path.parent}")
             return
 
-        # ── 2. Launch Frida CLI (used for both key capture and messaging) ──
-        proc = self._launch_frida_cli(pid, script_path)
-        if proc is None:
-            return  # error already notified
+        # ── 2. Launch CLI for frida-rpc messaging (always needed) ──
+        if client._messenger.name == "frida-rpc":
+            cli = FridaCliSession()
+            cli.attach(pid, script_path)
+            client._frida_cli_session = cli
+            client._notify("info", "Frida CLI 已启动")
 
-        # ── 3. Threaded reader (feeds both key capture + msg queue) ──
-        import threading
-        import queue
-        client._notify("info", "等待密钥... Frida CLI 已启动")
-        line_queue = queue.Queue()
-        msg_queue = queue.Queue()
-        client._frida_msg_queue = msg_queue
-        client._frida_cli_proc = proc
-
-        def _read_frida_stdout():
+        # ── 3. Check key cache ──
+        cache_file = client.config_path.parent / ".state" / "last_key.json"
+        if cache_file.exists():
             try:
-                for line in iter(proc.stdout.readline, ''):
-                    line_queue.put(line)
-                    if "[MSG_SENT]" in line:
-                        msg_queue.put(line)
+                cached = json.loads(cache_file.read_text(encoding="utf-8"))
+                if cached.get("pid") == pid and cached.get("key_hex"):
+                    return self._apply_cached_key(cached, client, pid)
             except Exception:
                 pass
-            finally:
-                line_queue.put(None)  # sentinel
 
-        reader_t = threading.Thread(target=_read_frida_stdout, daemon=True)
-        reader_t.start()
+        # ── 4. Capture fresh key ──
+        # Use shared CLI session if already created, otherwise create new one
+        cli = getattr(client, '_frida_cli_session', None)
+        if cli is None:
+            cli = FridaCliSession()
+            cli.attach(pid, script_path)
+            client._frida_cli_session = cli
 
-        deadline = time.time() + 30
-        key_data = None
-        hooks_ready = False
-
-        while time.time() < deadline:
-            try:
-                line = line_queue.get(timeout=0.5)
-            except queue.Empty:
-                if proc.poll() is not None:
-                    break
-                continue
-
-            if line is None:  # sentinel — stdout closed
-                break
-
-            line = line.strip()
-            if not line:
-                continue
-            print(f"[aes-cbc] {line[:120]}")
-
-            if not hooks_ready and ("Ready" in line or "Hooks installed" in line):
-                hooks_ready = True
-                print("[aes-cbc] Hooks ready, tapping screen...")
-                for i in range(5):
-                    subprocess.run(
-                        ["adb", "-s", serial, "shell", "input", "tap",
-                         str(400 + i * 40), str(500 + i * 20)],
-                        timeout=5, capture_output=True,
-                    )
-                    time.sleep(0.5)
-
-            if "KEY_JSON:" in line:
-                try:
-                    key_data = json.loads(line.split("KEY_JSON: ", 1)[1])
-                    break
-                except json.JSONDecodeError:
-                    pass
-
-        if proc.poll() is not None and not key_data:
-            stderr = proc.stderr.read()
-            print(f"[aes-cbc] Frida CLI exited: {stderr[:200]}")
+        client._notify("info", "等待密钥... Frida CLI 已启动")
+        key_data = cli.capture_key(timeout=30, tap_helper=serial)
 
         if not key_data:
             client._notify("error",
                            "密钥捕获超时（30s）。请确认 App 已登录并触发网络请求")
-            try:
-                proc.kill()
-            except Exception:
-                pass
             return
 
-        # ── 4. Parse key ──
-        key_hex = key_data.get("key_hex", "")
-        iv_hex = key_data.get("iv_hex", "")
-        headers = key_data.get("headers", {})
+        self._apply_fresh_key(key_data, client, pid)
 
+    def _apply_cached_key(self, cached: dict, client, pid: int) -> None:
+        """Restore key + headers from cache."""
+        print(f"[aes-cbc] Reusing cached key (PID={pid} unchanged)")
+        self._key = bytes.fromhex(cached["key_hex"])
+        cs = cached.get("headers", {}).get("clientSession", "")
+        if cs and len(cs) >= 16:
+            self._iv = cs[:16].encode("utf-8")
+        else:
+            self._iv = b"\x00" * 16
+
+        self._inject_headers(cached.get("headers", {}), client)
+        client._frida_authenticated = True
+        client._notify("info", f"复用缓存的密钥 (PID={pid})")
+
+    def _apply_fresh_key(self, key_data: dict, client, pid: int) -> None:
+        """Parse key_hex/iv/headers from captured data, inject, cache."""
+        key_hex = key_data.get("key_hex", "")
         if not key_hex:
             client._notify("error", "Frida 返回空密钥")
             return
 
         self._key = bytes.fromhex(key_hex)
-        # IV = clientSession[:16] (16 bytes ASCII)
+
+        headers = key_data.get("headers", {})
         client_session = headers.get("clientSession", "")
         if client_session and len(client_session) >= 16:
             self._iv = client_session[:16].encode("utf-8")
-        elif iv_hex:
-            self._iv = bytes.fromhex(iv_hex)
         else:
             self._iv = b"\x00" * 16
 
-        # Inject captured session headers into client (required for auth)
-        for hk in ("deviceToken", "SMDeviceId", "DeviceId",
-                    "clientSession", "Token"):
-            if hk in headers:
-                client._default_headers[hk] = headers[hk]
-        # Store Token for auth flow
-        if "Token" in headers:
-            client._auth_token = headers["Token"]
-        client._frida_authenticated = True  # mark: token from live Frida session
+        self._inject_headers(headers, client)
+        client._frida_authenticated = True
 
-        # ── 5. Cache key + PID for reuse ──
+        # Cache
         key_data["pid"] = pid
         cache_file = client.config_path.parent / ".state" / "last_key.json"
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cache_file.write_text(json.dumps(key_data, ensure_ascii=False, indent=2))
 
-        client._frida_cli_script = str(script_path)
-
         client._notify("info",
                        f"密钥捕获成功 ({len(self._key)} bytes)")
         print(f"[aes-cbc] Session key loaded via Frida CLI "
               f"({len(self._key)} bytes, IV from clientSession)")
+
+    @staticmethod
+    def _inject_headers(headers: dict, client) -> None:
+        """Inject captured session headers into client default_headers."""
+        for hk in ("deviceToken", "SMDeviceId", "DeviceId",
+                    "clientSession", "Token"):
+            if hk in headers:
+                client._default_headers[hk] = headers[hk]
+        if "Token" in headers:
+            client._auth_token = headers["Token"]
+
+    # ═══ Crypto ═══
 
     def encode(self, body: dict) -> bytes:
         if self._key is None:
@@ -324,5 +222,3 @@ class AesCbcEncryption(EncryptionProcessor):
             return json.loads(raw.decode("utf-8"))
         cipher = AES.new(self._key, AES.MODE_CBC, self._iv or b"\x00" * 16)
         return json.loads(unpad(cipher.decrypt(decoded), AES.block_size))
-
-

@@ -199,7 +199,5 @@
     "message_send": "RongCloud SDK -> RongIMClient.sendMessage()",
     "sp_path": "shared_prefs/AUTH_APP_INFO.xml",
     "hluda_required": true
-  },
-  "auth_token": "7937bebd-fb41-4204-aea4-d2ac9ceea03c",
-  "uid": "22187615"
+  }
 }

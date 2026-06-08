@@ -2,16 +2,21 @@
 var sessionKey = null;
 var sessionIV = null;
 var sessionHeaders = {};
+var lastKeyHex = null;
 var rongIMClient = null;
 var keyWritten = false;
 
 Java.perform(function() {
-    // 1. Capture Key
+    // 1. Capture Key — allow key rotation (B5 fix: clear keyWritten on new key)
     var SKS = Java.use("javax.crypto.spec.SecretKeySpec");
     SKS.$init.overload('[B', 'java.lang.String').implementation = function(kb, algo) {
-        if (!sessionKey && algo.indexOf("AES") >= 0 && kb.length === 32) {
+        if (algo.indexOf("AES") >= 0 && kb.length === 32) {
             var h = ""; for (var i = 0; i < kb.length; i++) h += ("0" + (kb[i] & 0xFF).toString(16)).slice(-2);
-            sessionKey = h;
+            if (h !== lastKeyHex) {
+                sessionKey = h;
+                lastKeyHex = h;
+                keyWritten = false;
+            }
         }
         return this.$init(kb, algo);
     };

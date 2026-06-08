@@ -7,6 +7,7 @@ from ..base import SigningProcessor
 WRITE_ENDPOINTS = {
     "passwordLogin", "joinRoom", "room/config",
     "UserRank/index", "sideRoomList", "connectSuccess", "RoomPage/leave",
+    "roomList", "UserRank/list", "HomePage/Ranking",
 }
 
 

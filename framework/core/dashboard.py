@@ -62,7 +62,7 @@ def api_start(app_id):
     # If messaging is frida-rpc, try to set up Frida session
     if task._messenger.name == "frida-rpc":
         # Already have CLI-based Frida connection (NIS bypass for sybl etc.)
-        if getattr(task, '_frida_cli_proc', None) is not None:
+        if getattr(task, '_frida_cli_session', None) is not None:
             pass  # Use CLI stdin messaging — no Python binding needed
         else:
             runtime_path = APPS_DIR / app_id / "runtime.json"
