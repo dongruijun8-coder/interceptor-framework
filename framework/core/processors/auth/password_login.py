@@ -42,6 +42,11 @@ class PasswordLoginAuth(AuthProcessor):
         return len(warnings) == 0, warnings
 
     def authenticate(self, client) -> bool:
+        # Already authenticated via Frida key capture (Token from session headers)
+        if client._auth_token:
+            client._notify("info", f"Token 已从 Frida 获取 (uid={client._uid or '?'})")
+            return True
+
         creds = self.load_credentials(client)
         endpoint = self.params["endpoint"]
         field_map = self.params["fields"]

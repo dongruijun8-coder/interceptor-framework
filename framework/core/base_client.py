@@ -871,6 +871,17 @@ class BaseClient:
                 current_room_name=room_name,
             )
 
+        # Join room if endpoint configured (required for some apps like sybl)
+        join_ep = self.config.get("endpoints", {}).get("join_room")
+        if join_ep:
+            try:
+                body = self._fill_template(join_ep.get("body", {}), room=room)
+                resp = self._request(join_ep, body)
+                if not self.check_response(resp):
+                    self._notify("error", f"进房失败 {room.get('name')}: {resp.get('msg','')}")
+            except Exception as e:
+                self._notify("error", f"进房异常 {room.get('name')}: {e}")
+
         try:
             users = self.fetch_users(self._user_source, room)
         except Exception as e:
