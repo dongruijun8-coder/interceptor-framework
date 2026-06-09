@@ -9,10 +9,8 @@ import requests
 import urllib3
 
 from .template import fill_template, resolve_path, map_fields
-from .state_manager import StateManager
-from .processor_registry import ProcessorRegistry
-from .diagnose import DiagnoseLogger
-from framework.bridge.frida_session import FridaDisconnectedError
+from .pagination import Paginator
+from .template import fill_template, resolve_path, map_fields
 
 
 class BaseClient:
@@ -46,6 +44,20 @@ class BaseClient:
 
         self.session = requests.Session()
         self.session.verify = False
+
+        # HttpClient — extracted transport layer
+        from .http import HttpClient
+        self.http = HttpClient(
+            base_url=self._base_url,
+            default_headers=self._default_headers,
+            encryptor=self._encryptor,
+            signer=self._signer,
+            diagnose=self._diagnose,
+            get_auth_token=lambda: self._auth_token,
+            get_uid=lambda: self._uid,
+            session=self.session,
+        )
+
         self._authenticated = False
         self._frida_authenticated = False
         self._auth_token = self.config.get("auth_token", "")
@@ -284,220 +296,31 @@ class BaseClient:
     # ═══ HTTP with processor pipeline ═══
 
     def _post(self, url: str, body: dict) -> dict:
-        path = url.replace(self._base_url, "") if self._base_url else url
-        _d = self._diagnose
-
-        t0 = time.time()
-        try:
-            encrypted = self._encryptor.encode(body)
-        except Exception as e:
-            _d.log("POST", path, "encrypt", f"FAILED: {e}")
-            raise RuntimeError(f"encryption.encode failed: {e}")
-        t1 = time.time()
-        _d.log("POST", path, "encrypt",
-               f"{self._encryptor.name} | body {len(json.dumps(body))}B -> {len(encrypted)}B",
-               (t1 - t0) * 1000)
-
-        headers = dict(self._default_headers)
-        ct_present = any(k.lower() == "content-type" for k in headers)
-        if not ct_present:
-            headers["Content-Type"] = "application/json; charset=utf-8"
-        headers["__auth_token__"] = self._auth_token
-
-        t0 = time.time()
-        headers, extra_params = self._signer.sign(url, headers, body)
-        t1 = time.time()
-        _d.log("POST", path, "sign",
-               f"{self._signer.name}", (t1 - t0) * 1000)
-
-        if self._auth_token:
-            _d.log("POST", path, "auth", f"token={self._auth_token[:12]}... uid={self._uid}")
-        else:
-            _d.log("POST", path, "auth", "skip (未认证)")
-
-        import urllib.parse
-        if extra_params:
-            sep = "&" if "?" in url else "?"
-            url = url + sep + urllib.parse.urlencode(extra_params)
-
-        t0 = time.time()
-        r = self.session.post(url, data=encrypted, headers=headers, timeout=30)
-        t1 = time.time()
-        r.raise_for_status()
-        _d.log("POST", path, "send",
-               f"{r.status_code} | {len(r.content)}B", (t1 - t0) * 1000)
-
-        t0 = time.time()
-        try:
-            decoded = self._encryptor.decode(r.content)
-        except Exception as e:
-            _d.log("POST", path, "decrypt", f"FAILED: {e}. 回退到 raw text")
-            try:
-                decoded = json.loads(r.text)
-            except json.JSONDecodeError:
-                raise RuntimeError(f"decryption failed: {r.text[:200]}")
-        t1 = time.time()
-        _d.log("POST", path, "decrypt",
-               f"{self._encryptor.name} | {len(r.content)}B -> {len(json.dumps(decoded))}B",
-               (t1 - t0) * 1000)
-
-        ok = self.check_response(decoded)
-        code = decoded.get("code", "?")
-        if ok:
-            _d.log("POST", path, "business", f"code={code} | OK")
-        else:
-            msg = decoded.get("msg", decoded.get("message", ""))
-            _d.log("POST", path, "business", f"code={code} | msg={msg} | ✗ 业务错误")
-
-        return decoded
+        return self.http.post(url, body)
 
     def _get(self, url: str, params: dict = None) -> dict:
-        path = url.replace(self._base_url, "") if self._base_url else url
-        _d = self._diagnose
-        params = dict(params or {})
-
-        headers = dict(self._default_headers)
-        headers["__auth_token__"] = self._auth_token
-
-        t0 = time.time()
-        headers, extra_params = self._signer.sign(url, headers, params)
-        t1 = time.time()
-        _d.log("GET", path, "sign", f"{self._signer.name}", (t1 - t0) * 1000)
-
-        if self._auth_token:
-            _d.log("GET", path, "auth", f"token={self._auth_token[:12]}...")
-        else:
-            _d.log("GET", path, "auth", "skip")
-
-        params.update(extra_params)
-
-        t0 = time.time()
-        r = self.session.get(url, params=params, headers=headers, timeout=30)
-        t1 = time.time()
-        r.raise_for_status()
-        _d.log("GET", path, "send", f"{r.status_code} | {len(r.content)}B", (t1 - t0) * 1000)
-
-        try:
-            decoded = self._encryptor.decode(r.content)
-        except Exception:
-            _d.log("GET", path, "decrypt", "no encryption / raw JSON")
-            decoded = json.loads(r.text)
-
-        ok = self.check_response(decoded)
-        code = decoded.get("code", "?")
-        if ok:
-            _d.log("GET", path, "business", f"code={code} | OK")
-        else:
-            _d.log("GET", path, "business", f"code={code} | ✗")
-
-        return decoded
+        return self.http.get(url, params)
 
     # ═══ Pagination ═══
 
     def _request(self, ep: dict, body: dict) -> dict:
-        """Dispatch to _get or _post based on endpoint method field (default POST)."""
-        method = ep.get("method", "POST").upper()
-        path = ep["path"]
-        url = f"{self._base_url}{path}"
-        if method == "GET":
-            return self._get(url, body)
-        else:
-            return self._post(url, body)
+        """Dispatch to GET or POST based on endpoint method field (default POST)."""
+        return self.http.request(ep, body)
 
     def _extract_list(self, resp: dict, ep: dict) -> list:
-        """Extract list from response using optional response_path config."""
-        path = ep.get("response_path", "data.list")
-        items = self._resolve_path(resp, path)
-        if isinstance(items, list):
-            return items
-        data = resp.get("data")
-        if isinstance(data, list):
-            return data
-        return []
+        return Paginator.extract_list(resp, ep)
 
     def _fetch_paginated(self, ep: dict, base_body: dict = None) -> list:
-        path = ep["path"]
-        pagination = ep.get("pagination")
-        base_url = self._base_url
-
         if base_body is None:
             base_body = self._fill_template(dict(ep.get("body", {})))
 
-        ptype = pagination.get("type") if pagination else None
+        def requester(body):
+            return self._request(ep, body)
 
-        # No pagination — single request
-        if not ptype:
-            resp = self._request(ep, base_body)
-            if self.check_response(resp):
-                return self._extract_list(resp, ep)
-            return []
+        def extractor(resp):
+            return Paginator.extract_list(resp, ep)
 
-        size = pagination.get("size", 20)
-        stop_on = pagination.get("stop_on", "empty_list")
-        results = []
-
-        if ptype == "offset_limit":
-            for offset in range(0, 500, size):
-                body = dict(base_body)
-                body["offset"] = offset
-                body["limit"] = size
-                resp = self._request(ep, body)
-                if not self.check_response(resp):
-                    break
-                items = self._extract_list(resp, ep)
-                if not items:
-                    break
-                results.extend(items)
-                if stop_on == "empty_list" and len(items) < size:
-                    break
-
-        elif ptype == "page_number":
-            for page in range(1, 50):
-                body = dict(base_body)
-                body["page"] = page
-                body["page_size"] = size
-                resp = self._request(ep, body)
-                if not self.check_response(resp):
-                    break
-                items = self._extract_list(resp, ep)
-                if not items:
-                    break
-                results.extend(items)
-                if stop_on == "empty_list" and len(items) < size:
-                    break
-
-        elif ptype == "cursor_offset":
-            # offset is a string cursor (empty for first page), next cursor from response
-            offset_field = pagination.get("offset_field", "offset")
-            offset_sent = pagination.get("offset_sent", "")  # path in response for next cursor
-            max_iters = pagination.get("max_iters", 30)
-            cursor = ""  # always start with empty string
-            for _ in range(max_iters):
-                body = dict(base_body)
-                body[offset_field] = cursor
-                resp = self._request(ep, body)
-                if not self.check_response(resp):
-                    break
-                items = self._extract_list(resp, ep)
-                if not items:
-                    break
-                results.extend(items)
-                if offset_sent:
-                    cursor = self._resolve_path(resp, offset_sent) or ""
-                else:
-                    cursor = ""
-                if not cursor:
-                    break
-                if stop_on == "empty_list" and len(items) < size:
-                    break
-
-        else:
-            # Unknown pagination type — single request
-            resp = self._request(ep, base_body)
-            if self.check_response(resp):
-                results = self._extract_list(resp, ep)
-
-        return results
+        return Paginator.paginate(ep, base_body, requester, extractor)
 
     # ═══ Template ═══
 

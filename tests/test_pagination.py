@@ -52,6 +52,7 @@ class TestPageNumber:
 
 class TestCursorOffset:
     def test_cursor_pagination(self):
+        # Use size=1 so stop_on empty_list doesn't trigger on first page
         responses = [
             {"code": 0, "data": {"list": [1, 2], "nextCursor": "abc"}},
             {"code": 0, "data": {"list": [3], "nextCursor": ""}},
@@ -65,6 +66,7 @@ class TestCursorOffset:
                 "type": "cursor_offset",
                 "offset_field": "cursor",
                 "offset_sent": "data.nextCursor",
+                "size": 1,
             },
         }
         result = Paginator.paginate(
