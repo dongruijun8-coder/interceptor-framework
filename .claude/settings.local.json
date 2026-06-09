@@ -255,7 +255,19 @@
       "Bash(python -m pytest tests/test_template.py tests/test_pagination.py -q)",
       "Bash(git mv *)",
       "Bash(python -c \"from framework.core.client import Client; print\\('OK'\\)\")",
-      "Bash(python -m pytest tests/ -q)"
+      "Bash(python -m pytest tests/ -q)",
+      "Bash(mkdir -p projects)",
+      "Bash(cp -r apps/hifun apps/piaopiao apps/sybl apps/wefun apps/__init__.py apps/wefun-config.json projects/)",
+      "Bash(cp -r apps/shuangyu apps/双鱼部落 projects/)",
+      "Bash(mkdir -p 参考)",
+      "Bash(cp -r design-system hifun 参考/)",
+      "Bash(mv data *)",
+      "Bash(mkdir -p tests tools 参考/data 参考/tools 参考/design-system 参考/hifun)",
+      "Bash(mkdir -p tests tools)",
+      "Bash(mv \"参考/tests/test_template.py\" \"参考/tests/test_pagination.py\" tests/)",
+      "Bash(mv \"参考/tools/frida-server-17.11.0-android-x86_64\" tools/)",
+      "Bash(mv \"参考/tests/test_e2e.py\" \"参考/tools/capture_ranking.js\" tools/)",
+      "Bash(rmdir \"参考/tests\" \"参考/tools\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\DYWH\\.claude",
