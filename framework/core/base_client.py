@@ -1,6 +1,5 @@
 """BaseClient — 配置驱动 Pipeline，加载处理器链执行"""
 import json
-import random
 import threading
 import time
 from pathlib import Path
@@ -13,7 +12,7 @@ from .processor_registry import ProcessorRegistry
 from .diagnose import DiagnoseLogger
 from .template import fill_template, resolve_path, map_fields
 from .pagination import Paginator
-from framework.bridge.frida_session import FridaDisconnectedError
+from .pipeline import Pipeline
 
 
 class BaseClient:
@@ -61,6 +60,9 @@ class BaseClient:
             session=self.session,
         )
 
+        # Pipeline — orchestration
+        self.pipeline = Pipeline(self)
+
         self._authenticated = False
         self._frida_authenticated = False
         self._auth_token = self.config.get("auth_token", "")
@@ -89,17 +91,14 @@ class BaseClient:
         keys = list(self._genders.keys())
         self._gender = rt.get("gender", keys[0] if keys else "")
 
-        self._running = False
-        self._pause_event = threading.Event()
-        self._pause_event.set()
         self._lock = threading.Lock()
         self._rooms = []
         self._progress = {}
         self._on_update = None
-        self._current_user = {}          # 当前正在发的用户 {uid, nick, text}
-        self._recent_sent: list[dict] = []  # 最近已发 (最多 20 条)
-        self._recent_failed: list[dict] = []  # 最近失败
-        self._ranking_users: list[dict] = []   # 当前房间排行用户（含发送状态）
+        self._current_user = {}
+        self._recent_sent: list[dict] = []
+        self._recent_failed: list[dict] = []
+        self._ranking_users: list[dict] = []
 
         # Header defaults from config
         self._default_headers = self.config.get("server", {}).get("default_headers", {}).copy()
@@ -123,11 +122,10 @@ class BaseClient:
             self._encryptor.derive_key(self)
         return self._auth_processor.authenticate(self)
 
-    # ═══ 3 core methods (config-driven) ═══
+    # ═══ Core methods (config-driven) ═══
 
     def fetch_all_rooms(self) -> list:
         ep = self.config["endpoints"]["all_rooms"]
-        # WebSocket transport — use Frida RPC bridge
         if ep.get("transport") == "ws":
             return self._fetch_rooms_ws(ep)
         if "steps" in ep:
@@ -140,39 +138,29 @@ class BaseClient:
             return rooms
 
     def _fetch_rooms_ws(self, ep: dict) -> list:
-        """通过 Frida RPC 从 WebSocket 连接获取房间列表。
+        """WS transport — delegates to Frida RPC bridge."""
+        from framework.bridge.frida_session import FridaSessionManager
 
-        流程：
-        1. 注入 WS hook 脚本（hook_ws_rooms.js）到已连接的 Frida session
-        2. 脚本 hook OkHttp WebSocket，拦截/缓存房间数据
-        3. 通过 RPC getRooms() 获取缓存结果
-        4. 应用 output_mapping 返回统一格式
-        """
         ws_cfg = ep.get("ws", {})
         method = ws_cfg.get("method", "getRooms")
         script_name = ws_cfg.get("script", "hook_ws_rooms.js")
 
-        # Auto-connect Frida if not already connected
         if not self._frida_session or not self._frida_session.is_connected:
             rt = self._load_runtime()
             device = rt.get("device", {})
             serial = device.get("serial", "")
             package = device.get("app_package", self.config.get("meta", {}).get("package", ""))
             if not serial or not package:
-                raise RuntimeError(
-                    "WS 房间列表需要 Frida 连接，但未配置设备。请在 Dashboard 设置设备串号")
-            # Auto-connect: use IM script as main, WS hook loaded as second
+                raise RuntimeError("WS 房间列表需要 Frida 连接，但未配置设备。请在 Dashboard 设置设备串号")
             main_script = str(self.config_path.parent / device.get("script_name", "hook_send_msg.js"))
             if not Path(main_script).exists():
                 main_script = str(self.config_path.parent / "hook_send_msg.js")
-            from framework.bridge.frida_session import FridaSessionManager
             try:
                 self._frida_session = FridaSessionManager().get_or_create(
                     self.app_name, serial, package, main_script)
             except Exception as e:
                 raise RuntimeError(f"Frida 连接失败: {e}")
 
-        # Load the WS hook script into the same Frida session
         script_path = self.config_path.parent / script_name
         if not script_path.exists():
             alt = Path("apps") / self.app_name / script_name
@@ -186,13 +174,9 @@ class BaseClient:
         except Exception as e:
             raise RuntimeError(f"WS 脚本注入失败: {e}")
 
-        # 通知前端等待
         self._notify("info", "WebSocket 房间扫描中... 请在 App 中进入房间列表页面")
-
-        # 轮询获取房间数据（需要用户在 App 中浏览房间以触发 WS 推送）
-        deadline = time.time() + 30  # 最多等 30 秒
+        deadline = time.time() + 30
         while time.time() < deadline:
-            # 检查暂停/停止
             if not self._running:
                 return []
             try:
@@ -210,7 +194,6 @@ class BaseClient:
                 pass
             time.sleep(1.0)
 
-        # Timeout — 返回已缓存的数据
         try:
             rpc = self._frida_session._rpc_second or self._frida_session._rpc
             raw = getattr(rpc, method)()
@@ -234,12 +217,10 @@ class BaseClient:
     def _execute_steps(self, ep: dict) -> list:
         all_rooms = []
         step_results = {}
-
         for step in ep["steps"]:
             name = step["name"]
             pagination = step.get("pagination")
             iter_source = step.get("iter_source", "")
-
             if iter_source:
                 src_name, src_path = iter_source.split(".", 1)
                 src_data = step_results.get(src_name, {})
@@ -255,13 +236,10 @@ class BaseClient:
                     step_results[name] = {"list": results, "raw": results}
                     all_rooms = results
                 else:
-                    base_url = self._base_url
-                    path = step["path"]
                     resp = self._request(step, body)
                     if self.check_response(resp):
                         items = self._extract_list(resp, step)
                         step_results[name] = {"list": items, "raw": resp.get("data", {})}
-
         mapping = ep.get("output_mapping", {})
         return [self._map_fields(r, mapping) for r in all_rooms]
 
@@ -270,11 +248,9 @@ class BaseClient:
         period_key = self._periods.get(period, "day")
         ds_key = self._data_sources.get(self._data_source, "")
 
-        # Support per-period list selection via output_mapping.lists config
         op = ep.get("output_mapping", {})
         lists_cfg = op.get("lists", {})
         if lists_cfg:
-            # Find the list key matching this period (e.g. rich_day, rich_week)
             matched = None
             for list_key, list_cfg in lists_cfg.items():
                 if list_key.endswith(f"_{period_key}"):
@@ -296,7 +272,7 @@ class BaseClient:
     def send_message(self, uid: str, text: str) -> dict:
         return self._messenger.send(self, uid, text)
 
-    # ═══ HTTP with processor pipeline ═══
+    # ═══ HTTP delegation ═══
 
     def _post(self, url: str, body: dict) -> dict:
         return self.http.post(url, body)
@@ -304,11 +280,10 @@ class BaseClient:
     def _get(self, url: str, params: dict = None) -> dict:
         return self.http.get(url, params)
 
-    # ═══ Pagination ═══
-
     def _request(self, ep: dict, body: dict) -> dict:
-        """Dispatch to GET or POST based on endpoint method field (default POST)."""
         return self.http.request(ep, body)
+
+    # ═══ Pagination delegation ═══
 
     def _extract_list(self, resp: dict, ep: dict) -> list:
         return Paginator.extract_list(resp, ep)
@@ -316,35 +291,28 @@ class BaseClient:
     def _fetch_paginated(self, ep: dict, base_body: dict = None) -> list:
         if base_body is None:
             base_body = self._fill_template(dict(ep.get("body", {})))
-
         def requester(body):
             return self._request(ep, body)
-
         def extractor(resp):
             return Paginator.extract_list(resp, ep)
-
         return Paginator.paginate(ep, base_body, requester, extractor)
 
-    # ═══ Template ═══
+    # ═══ Template delegation ═══
 
     def _identity_vars(self) -> dict:
-        """运行时身份变量，所有请求 body 自动注入"""
         import time as _time
         rt = self._load_runtime()
         device = rt.get("device", {})
         profile = rt.get("profile", {})
         did = device.get("device_id",
                 self.config.get("server", {}).get("default_headers", {}).get("device-id", ""))
-        # uid as int (for APIs that need number), also available as uid_str
         try:
             uid_int = int(self._uid) if self._uid else 0
         except (ValueError, TypeError):
             uid_int = 0
         return {
-            "uid": uid_int,
-            "uid_str": str(self._uid) if self._uid else "",
-            "token": self._auth_token,
-            "device_id": did,
+            "uid": uid_int, "uid_str": str(self._uid) if self._uid else "",
+            "token": self._auth_token, "device_id": did,
             "shumei_device_id": device.get("shumei_device_id", did),
             "h5_ts": str(int(_time.time() * 1000)),
             "timestamp_ms": str(int(_time.time() * 1000)),
@@ -357,12 +325,10 @@ class BaseClient:
 
     @staticmethod
     def _ensure_app_running(serial: str, package: str) -> int | None:
-        """Ensure the target app is running. Restart via monkey if dead. Returns PID."""
         from framework.bridge.adb_device import AdbDevice
         pid = AdbDevice.get_pid(serial, package)
         if pid:
             return pid
-
         import subprocess as _subprocess
         print(f"[base_client] App {package} 未运行，尝试启动...")
         _subprocess.run(
@@ -379,357 +345,44 @@ class BaseClient:
     def _map_fields(self, raw, mapping):
         return map_fields(raw, mapping, self._identity_vars())
 
-    # ═══ Pipeline (unchanged from original) ═══
+    # ═══ User fetching ═══
 
     def fetch_users(self, source_name: str, room: dict = None) -> list:
-        """根据用户来源拉取用户列表。
-
-        模板变量从 self._data_source / self._period 解析，
-        与 fetch_room_ranking 保持一致。
-        """
         cfg = self._user_sources.get(source_name)
         if not cfg:
             return []
-
         ep_name = cfg.get("endpoint")
         if not ep_name:
             return []
-
         ep = dict(self.config["endpoints"][ep_name])
-
-        # Resolve template variables
         ds_key = self._data_sources.get(self._data_source, "")
         period_key = self._periods.get(self._period, "day")
-
         if cfg["type"] == "global":
             body = self._fill_template(
-                ep.get("body", {}),
-                data_source_key=ds_key,
-                period_key=period_key,
-            )
+                ep.get("body", {}), data_source_key=ds_key, period_key=period_key)
             items = self._fetch_paginated(ep, body)
             mapping = ep.get("output_mapping", {})
             if mapping:
                 items = [self._map_fields(u, mapping) for u in items]
             return items
-
         elif cfg["type"] == "per_room":
             if room is None:
                 return []
-            # Reuse existing per-room ranking logic
             return self.fetch_room_ranking(room, self._period)
 
-    def run_pipeline(self) -> None:
-        self._running = True
-        self._pause_event.set()
-
-        if not self._authenticated:
-            if not self.authenticate():
-                self._notify("error", "认证失败")
-                self._running = False
-                return
-            self._authenticated = True
-
-        cfg = self._current_source_cfg
-        if not cfg:
-            self._notify("error", "未配置用户来源 (user_sources 为空)")
-            self._running = False
-            return
-
-        if cfg["type"] == "global":
-            self._run_global(cfg)
-        else:
-            self._run_per_room(cfg)
-
-        self._running = False
-
-    def _run_global(self, cfg: dict) -> None:
-        """全站榜单模式：不扫描房间，直接拉取用户列表发送。"""
-        self._notify("info", f"全站模式: {self._user_source}")
-        try:
-            users = self.fetch_users(self._user_source)
-        except Exception as e:
-            self._notify("error", f"拉取用户失败: {e}")
-            return
-
-        with self._lock:
-            self._progress["total_users"] = len(users)
-            self._progress["sent_total"] = 0
-            self._progress["failed_total"] = 0
-
-        self._notify("info", f"拉取完成: {len(users)} 人")
-
-        # Gender filter
-        gender_target = self._genders.get(self._gender)
-        if gender_target is not None:
-            users = [u for u in users if u.get("gender") == gender_target]
-            with self._lock:
-                self._progress["total_users"] = len(users)
-
-        # Sort by amount descending
-        users.sort(key=lambda u: u.get("amount", 0), reverse=True)
-
-        # Store for frontend display
-        with self._lock:
-            self._ranking_users = [dict(u, status="wait") for u in users]
-
-        # Batch-mark already-sent
-        skip_uids = set()
-        for user in users:
-            uid = str(user.get("uid", ""))
-            if uid and self.state.is_sent_today(uid):
-                skip_uids.add(uid)
-        if skip_uids:
-            with self._lock:
-                for ru in self._ranking_users:
-                    if str(ru.get("uid")) in skip_uids:
-                        ru["status"] = "sent"
-
-        # Send loop (no room context)
-        for user in users:
-            if not self._wait_if_paused():
-                break
-            self._send_to_user(user, room=None)
-
-        if self._running:
-            self._notify("done", "全站发送完成")
-
-    def _run_per_room(self, cfg: dict) -> None:
-        """房间遍历模式：现有逻辑不变。"""
-        self._rooms = self.state.load_rooms()
-        if not self._rooms:
-            self._notify("info", "扫描房间...")
-            try:
-                self._rooms = self.fetch_all_rooms()
-            except Exception as e:
-                self._notify("error", f"扫描房间失败: {e}")
-                self._running = False
-                return
-            self.state.save_rooms(self._rooms)
-            self._notify("info", f"扫描完成: {len(self._rooms)} 间房")
-
-        with self._lock:
-            self._progress = self.state.load_progress()
-            start_idx = self._progress.get("current_room_index", 0)
-
-        for idx in range(start_idx, len(self._rooms)):
-            if not self._wait_if_paused():
-                break
-            room = self._rooms[idx]
-            self._notify("progress", {"current_room_index": idx, "room": room})
-            try:
-                self.run_room(room, idx)
-            except FridaDisconnectedError:
-                # Try recovery: restart app + reconnect once
-                rt = self._load_runtime()
-                dev = rt.get("device", {})
-                serial = dev.get("serial", "")
-                package = dev.get("app_package",
-                                  self.config.get("meta", {}).get("package", ""))
-                if serial and package:
-                    new_pid = self._ensure_app_running(serial, package)
-                    if new_pid:
-                        self._notify("info", f"App 已恢复 (PID={new_pid})，继续...")
-                        try:
-                            self.run_room(room, idx)
-                            continue
-                        except Exception:
-                            pass
-                self._notify("error", "Frida 会话已断开且无法恢复，任务暂停")
-                self.pause()
-                return
-            except Exception as e:
-                self._notify("error", f"房间 {room.get('name')} 失败: {e}")
-
-        if self._running:
-            with self._lock:
-                self._progress["current_room_index"] = len(self._rooms)
-                self._progress["current_room_name"] = ""
-            self.state.save_progress(
-                current_room_index=len(self._rooms),
-                current_room_name="",
-            )
-            self._notify("done", "全部房间完成")
-
-    def _send_to_user(self, user: dict, room: dict = None) -> None:
-        """发送消息给单个用户。global 和 per_room 共用。"""
-        uid = str(user.get("uid", ""))
-        nick = user.get("nick", "")
-        room_name = room.get("name", "") if room else ""
-
-        if self.state.is_sent_today(uid):
-            return
-
-        template = random.choice(self._templates)
-        text = template.replace("{nick}", nick).replace("{room_name}", room_name)
-
-        with self._lock:
-            self._current_user = {
-                "uid": uid, "nick": nick, "text": text,
-                "room": room_name,
-                "time": time.strftime("%H:%M:%S"),
-            }
-            for ru in self._ranking_users:
-                if str(ru.get("uid")) == uid:
-                    ru["status"] = "sending"
-                    break
-
-        # 短暂延迟让前端轮询捕获"sending"状态
-        time.sleep(0.6)
-
-        try:
-            result = self.send_message(uid, text)
-        except Exception as e:
-            result = {"success": False, "error": str(e)}
-
-        entry = {
-            "uid": uid, "nick": nick,
-            "room": room_name,
-            "time": time.strftime("%H:%M:%S"),
-            "success": result.get("success", False),
-            "error": result.get("error", ""),
-        }
-
-        if result.get("success"):
-            entry["text"] = text
-            self.state.mark_sent(uid, nick, room_name)
-            with self._lock:
-                sent = self._progress.get("sent_total", 0) + 1
-                self._progress["sent_total"] = sent
-                self.state.save_progress(sent_total=sent)
-                self._current_user = {}
-                self._recent_sent.insert(0, entry)
-                if len(self._recent_sent) > 20:
-                    self._recent_sent = self._recent_sent[:20]
-                for ru in self._ranking_users:
-                    if str(ru.get("uid")) == uid:
-                        ru["status"] = "sent"
-                        break
-            self._notify("sent", {"uid": uid, "nick": nick, "text": text})
-        else:
-            with self._lock:
-                failed = self._progress.get("failed_total", 0) + 1
-                self._progress["failed_total"] = failed
-                self.state.save_progress(failed_total=failed)
-                self._current_user = {}
-                self._recent_failed.insert(0, entry)
-                if len(self._recent_failed) > 20:
-                    self._recent_failed = self._recent_failed[:20]
-                for ru in self._ranking_users:
-                    if str(ru.get("uid")) == uid:
-                        ru["status"] = "failed"
-                        break
-            self._notify("failed", {
-                "uid": uid, "nick": nick,
-                "error": result.get("error", "unknown"),
-            })
-
-        time.sleep(self._interval)
-
-    def run_room(self, room: dict, idx: int) -> None:
-        room_name = room.get("name", "")
-        with self._lock:
-            self._progress["current_room_name"] = room_name
-
-        # Join room if endpoint configured (required for some apps like sybl)
-        join_ep = self.config.get("endpoints", {}).get("join_room")
-        if join_ep:
-            try:
-                body = self._fill_template(join_ep.get("body", {}), room=room)
-                resp = self._request(join_ep, body)
-                if not self.check_response(resp):
-                    self._notify("error", f"进房失败 {room.get('name')}: {resp.get('msg','')}")
-            except Exception as e:
-                self._notify("error", f"进房异常 {room.get('name')}: {e}")
-
-        try:
-            users = self.fetch_users(self._user_source, room)
-        except Exception as e:
-            with self._lock:
-                self._ranking_users = []
-            self._notify("error", f"排行失败 {room.get('name')}: {e}")
-            return
-
-        if not users:
-            # Diagnostic: try one manual ranking request to see response
-            try:
-                body = self._fill_template(
-                    dict(self.config["endpoints"]["ranking"].get("body", {})),
-                    room=room,
-                    period_key=self._periods.get(self._period, "day"),
-                    data_source_key=self._data_sources.get(self._data_source, ""),
-                )
-                print(f"[diagnose] ranking body: {json.dumps(body, ensure_ascii=False)}")
-                resp = self._request(self.config["endpoints"]["ranking"], body)
-                code = resp.get("code", "")
-                count = len(self._extract_list(resp, self.config["endpoints"]["ranking"]))
-                print(f"[diagnose] ranking resp: code={code} items={count} msg={resp.get('message','')}")
-            except Exception:
-                pass
-
-        gender_target = self._genders.get(self._gender)
-        if gender_target is not None:
-            users = [u for u in users if u.get("gender") == gender_target]
-
-        users.sort(key=lambda u: u.get("amount", 0), reverse=True)
-
-        # Store ranking users with initial status for frontend display
-        with self._lock:
-            self._ranking_users = [dict(u, status="wait") for u in users]
-
-        # Batch-mark already-sent users so UI shows "sent" not "wait"
-        skip_uids = set()
-        for user in users:
-            uid = str(user.get("uid", ""))
-            if uid and self.state.is_sent_today(uid):
-                skip_uids.add(uid)
-        if skip_uids:
-            with self._lock:
-                for ru in self._ranking_users:
-                    if str(ru.get("uid")) in skip_uids:
-                        ru["status"] = "sent"
-
-        for user in users:
-            if not self._wait_if_paused():
-                break
-            self._send_to_user(user, room)
-
-        # Room fully processed — save progress
-        with self._lock:
-            self._progress["current_room_index"] = idx + 1
-            self.state.save_progress(
-                current_room_index=idx + 1,
-                current_room_name=room_name,
-            )
-
-    # ═══ Control ═══
-
-    def _wait_if_paused(self) -> bool:
-        self._pause_event.wait()
-        return self._running
-
-    def refresh_rooms(self) -> list:
-        if not self._authenticated:
-            if not self.authenticate():
-                raise RuntimeError("认证失败")
-            self._authenticated = True
-        self._rooms = self.fetch_all_rooms()
-        self.state.save_rooms(self._rooms)
-        return self._rooms
+    # ═══ Pipeline delegation ═══
 
     def start(self) -> None:
-        t = threading.Thread(target=self.run_pipeline, daemon=True)
-        t.start()
+        self.pipeline.start()
 
     def pause(self) -> None:
-        self._pause_event.clear()
+        self.pipeline.pause()
 
     def resume(self) -> None:
-        self._pause_event.set()
+        self.pipeline.resume()
 
     def stop(self) -> None:
-        self._running = False
-        self._pause_event.set()
+        self.pipeline.stop()
 
     def reset_progress(self) -> None:
         with self._lock:
@@ -737,12 +390,12 @@ class BaseClient:
             self._rooms = []
             self.state.reset_progress()
 
+    # ═══ Frida session ═══
+
     def set_frida_session(self, session) -> None:
-        """Set the Frida session used by frida-rpc messaging processor"""
         self._frida_session = session
 
     def clear_frida_session(self) -> None:
-        """Clear the Frida session (called on stop)"""
         if self._frida_session:
             try:
                 self._frida_session.disconnect()
@@ -750,13 +403,19 @@ class BaseClient:
                 pass
             self._frida_session = None
 
+    # ═══ Status ═══
+
     @property
     def status(self) -> str:
-        if not self._running:
-            return "idle"
-        if not self._pause_event.is_set():
-            return "paused"
-        return "running"
+        return self.pipeline.status
+
+    @property
+    def _running(self) -> bool:
+        return self.pipeline._running
+
+    @_running.setter
+    def _running(self, value):
+        pass
 
     def get_stats(self) -> dict:
         with self._lock:
@@ -796,7 +455,7 @@ class BaseClient:
             "ranking_users": ranking_users,
             "sent_today_total": len(sent_today_data := self.state.load_sent_today().get("sent", [])),
             "rooms_today_total": len(set(s.get("room", "") for s in sent_today_data if s.get("room"))),
-            "sent_today_data": sent_today_data,  # avoid double read
+            "sent_today_data": sent_today_data,
             "credentials": (rt := self._load_runtime()).get("credentials", {}),
             "profile": rt.get("profile", {}),
             "device": rt.get("device", {}),
@@ -813,7 +472,6 @@ class BaseClient:
         status = resp_data.get("status")
         if status is not None and status == 0:
             return True
-        # WeFun-style: ret=1
         ret = resp_data.get("ret")
         if ret is not None and int(ret) == 1:
             return True

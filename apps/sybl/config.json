@@ -11,12 +11,31 @@
     "package": "com.sybl.voiceroom",
     "script": "frida_key_bridge.js",
     "modules": [
-      {"name": "secret_key_spec", "params": {}},
-      {"name": "okhttp", "params": {}},
-      {"name": "key_export", "params": {}},
-      {"name": "messaging_rongcloud", "params": {"app_key": "m7ua80gbmdddm"}}
+      {
+        "name": "secret_key_spec",
+        "params": {}
+      },
+      {
+        "name": "okhttp",
+        "params": {}
+      },
+      {
+        "name": "key_export",
+        "params": {}
+      },
+      {
+        "name": "messaging_rongcloud",
+        "params": {
+          "app_key": "m7ua80gbmdddm"
+        }
+      }
     ],
-    "rpc_methods": ["getSessionKey", "getHeaders", "sendMessage", "getStatus"],
+    "rpc_methods": [
+      "getSessionKey",
+      "getHeaders",
+      "sendMessage",
+      "getStatus"
+    ],
     "note": "Requires hluda-server (NOT frida-server). NIS anti-Frida detection. modules 优先于 script。"
   },
   "server": {
@@ -117,7 +136,7 @@
         "room_id": "{{room.id}}",
         "mode": "{{data_source_key}}",
         "rank_type": "{{period_key}}",
-        "page": 1,
+        "page": "{{page}}",
         "page_size": 20
       },
       "pagination": {
@@ -199,5 +218,7 @@
     "message_send": "RongCloud SDK -> RongIMClient.sendMessage()",
     "sp_path": "shared_prefs/AUTH_APP_INFO.xml",
     "hluda_required": true
-  }
+  },
+  "auth_token": "8dc4dfd2-f341-4a0e-b997-6ef42d9c75f7",
+  "uid": "22187615"
 }

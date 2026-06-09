@@ -31,11 +31,16 @@ class DiagnoseLogger:
     def log(self, method: str, path: str, step: str, detail: str, ms: float = 0):
         if not self.enabled:
             return
+        import sys
         ts = time.strftime("%H:%M:%S")
         line = f"[diagnose {ts}] {method} {path} | {step}: {detail}"
         if ms > 0:
             line += f" | {ms:.1f}ms"
-        print(line)
+        try:
+            print(line)
+        except UnicodeEncodeError:
+            # Windows GBK terminal can't print certain chars — fallback
+            print(line.encode('ascii', errors='replace').decode('ascii'))
 
         payload = {
             "app": self.app_name, "method": method, "path": path,
