@@ -1,7 +1,6 @@
 """BaseClient — 配置驱动 Pipeline，加载处理器链执行"""
 import json
 import random
-import re
 import threading
 import time
 from pathlib import Path
@@ -9,6 +8,7 @@ from pathlib import Path
 import requests
 import urllib3
 
+from .template import fill_template, resolve_path, map_fields
 from .state_manager import StateManager
 from .processor_registry import ProcessorRegistry
 from .diagnose import DiagnoseLogger
@@ -526,45 +526,8 @@ class BaseClient:
             "gender": str(profile.get("gender", "1")),
         }
 
-    def _fill_template(self, template, **kwargs) -> dict:
-        result = {}
-        for key, value in template.items():
-            if isinstance(value, str) and "{{" in value:
-                # Single {{var}} — preserve raw type (int, bool, etc.)
-                m = re.fullmatch(r'\{\{(.+?)\}\}', value.strip())
-                if m:
-                    var_path = m.group(1)
-                    parts = var_path.split(".", 1)
-                    if parts[0] in kwargs:
-                        obj = kwargs[parts[0]]
-                        if len(parts) > 1 and isinstance(obj, dict):
-                            result[key] = obj.get(parts[1], "")  # preserve type
-                        else:
-                            result[key] = obj
-                        continue
-                    ident = self._identity_vars()
-                    if var_path in ident:
-                        result[key] = ident[var_path]
-                        continue
-                # Multi-var or mixed text — string replacement
-                def replacer(m):
-                    var_path = m.group(1)
-                    parts = var_path.split(".", 1)
-                    if parts[0] in kwargs:
-                        obj = kwargs[parts[0]]
-                        if len(parts) > 1 and isinstance(obj, dict):
-                            return str(obj.get(parts[1], ""))
-                        return str(obj)
-                    ident = self._identity_vars()
-                    if var_path in ident:
-                        return str(ident[var_path])
-                    return m.group(0)
-                result[key] = re.sub(r'\{\{(.+?)\}\}', replacer, value)
-            elif isinstance(value, dict):
-                result[key] = self._fill_template(value, **kwargs)
-            else:
-                result[key] = value
-        return result
+    def _fill_template(self, template, **kwargs):
+        return fill_template(template, self._identity_vars(), **kwargs)
 
     @staticmethod
     def _ensure_app_running(serial: str, package: str) -> int | None:
@@ -584,36 +547,11 @@ class BaseClient:
         return AdbDevice.get_pid(serial, package)
 
     @staticmethod
-    def _resolve_path(data: dict, path: str):
-        parts = path.split(".")
-        current = data
-        for p in parts:
-            if isinstance(current, dict):
-                current = current.get(p)
-            elif isinstance(current, list):
-                try:
-                    idx = int(p)
-                    current = current[idx] if idx < len(current) else None
-                except ValueError:
-                    return None
-            else:
-                return None
-        return current
+    def _resolve_path(data, path):
+        return resolve_path(data, path)
 
-    def _map_fields(self, raw: dict, mapping: dict) -> dict:
-        result = {}
-        for framework_field, source in mapping.items():
-            if isinstance(source, str) and "{{" in source:
-                val = self._fill_template({"k": source}, **{})["k"]
-                result[framework_field] = val
-            elif isinstance(source, str) and "." in source:
-                result[framework_field] = self._resolve_path(raw, source)
-            else:
-                if isinstance(source, str):
-                    result[framework_field] = raw.get(source, source)
-                else:
-                    result[framework_field] = source
-        return result
+    def _map_fields(self, raw, mapping):
+        return map_fields(raw, mapping, self._identity_vars())
 
     # ═══ Pipeline (unchanged from original) ═══
 
@@ -865,12 +803,7 @@ class BaseClient:
     def run_room(self, room: dict, idx: int) -> None:
         room_name = room.get("name", "")
         with self._lock:
-            self._progress["current_room_index"] = idx
             self._progress["current_room_name"] = room_name
-            self.state.save_progress(
-                current_room_index=idx,
-                current_room_name=room_name,
-            )
 
         # Join room if endpoint configured (required for some apps like sybl)
         join_ep = self.config.get("endpoints", {}).get("join_room")
@@ -890,6 +823,23 @@ class BaseClient:
                 self._ranking_users = []
             self._notify("error", f"排行失败 {room.get('name')}: {e}")
             return
+
+        if not users:
+            # Diagnostic: try one manual ranking request to see response
+            try:
+                body = self._fill_template(
+                    dict(self.config["endpoints"]["ranking"].get("body", {})),
+                    room=room,
+                    period_key=self._periods.get(self._period, "day"),
+                    data_source_key=self._data_sources.get(self._data_source, ""),
+                )
+                print(f"[diagnose] ranking body: {json.dumps(body, ensure_ascii=False)}")
+                resp = self._request(self.config["endpoints"]["ranking"], body)
+                code = resp.get("code", "")
+                count = len(self._extract_list(resp, self.config["endpoints"]["ranking"]))
+                print(f"[diagnose] ranking resp: code={code} items={count} msg={resp.get('message','')}")
+            except Exception:
+                pass
 
         gender_target = self._genders.get(self._gender)
         if gender_target is not None:
@@ -917,6 +867,14 @@ class BaseClient:
             if not self._wait_if_paused():
                 break
             self._send_to_user(user, room)
+
+        # Room fully processed — save progress
+        with self._lock:
+            self._progress["current_room_index"] = idx + 1
+            self.state.save_progress(
+                current_room_index=idx + 1,
+                current_room_name=room_name,
+            )
 
     # ═══ Control ═══
 

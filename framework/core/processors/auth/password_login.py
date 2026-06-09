@@ -1,6 +1,7 @@
 """密码登录认证"""
 import json
 
+from framework.core.template import resolve_path
 from ..base import AuthProcessor
 
 
@@ -74,8 +75,8 @@ class PasswordLoginAuth(AuthProcessor):
             return False
 
         data = resp.get("data", {})
-        token = self._resolve_path(data, resp_map.get("token", "token"))
-        uid = self._resolve_path(data, resp_map.get("uid", "uid"))
+        token = resolve_path(data, resp_map.get("token", "token"))
+        uid = resolve_path(data, resp_map.get("uid", "uid"))
 
         if not token:
             client._notify("error", "登录响应缺少 token")
@@ -83,6 +84,7 @@ class PasswordLoginAuth(AuthProcessor):
 
         client._auth_token = token
         client._uid = str(uid) if uid else ""
+        client._default_headers["Token"] = token
 
         client.config["auth_token"] = token
         client.config["uid"] = client._uid
@@ -94,17 +96,5 @@ class PasswordLoginAuth(AuthProcessor):
         nick = data.get("nickname", data.get("nick", ""))
         client._notify("info", f"登录成功 uid={uid} nick={nick}")
         return True
-
-    @staticmethod
-    def _resolve_path(data: dict, path: str):
-        """从嵌套 JSON 取值，支持 'data.user.id' 格式"""
-        parts = path.split(".")
-        current = data
-        for p in parts:
-            if isinstance(current, dict):
-                current = current.get(p)
-            else:
-                return None
-        return current
 
 
