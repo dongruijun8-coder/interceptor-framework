@@ -1,4 +1,7 @@
-"""预置处理器组合配方 — 一个名字展开为完整 pipeline 配置"""
+"""预置处理器组合配方 — 一个名字展开为完整 pipeline 配置。
+
+只提供结构，密钥等敏感值由 app config.json 提供。
+"""
 RECIPES = {
     "sybl-pattern": {
         "encryption": {
@@ -7,7 +10,7 @@ RECIPES = {
         },
         "signing": {
             "plugin": "xor-triple-sign",
-            "params": {"read_key": "01528e5f", "write_key": "01528e5f", "p3_key": "00000000"},
+            "params": {},
         },
         "auth": {
             "plugin": "password-login",
@@ -55,5 +58,17 @@ def expand_recipe(pipeline_config: dict) -> dict:
     result = dict(base)
     for category in ["encryption", "signing", "auth", "messaging"]:
         if category in pipeline_config:
-            result[category] = pipeline_config[category]
+            # Deep merge params if both specify them
+            user = pipeline_config[category]
+            if isinstance(user, dict) and isinstance(base[category], dict):
+                merged = dict(base[category])
+                merged.update(user)
+                # Merge params separately
+                if "params" in user and "params" in base[category]:
+                    mp = dict(base[category]["params"])
+                    mp.update(user["params"])
+                    merged["params"] = mp
+                result[category] = merged
+            else:
+                result[category] = user
     return result

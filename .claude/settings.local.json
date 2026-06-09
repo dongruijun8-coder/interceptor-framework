@@ -254,7 +254,8 @@
       "Bash(python -c \"from framework.core.pipeline import Pipeline; print\\('Pipeline OK'\\)\")",
       "Bash(python -m pytest tests/test_template.py tests/test_pagination.py -q)",
       "Bash(git mv *)",
-      "Bash(python -c \"from framework.core.client import Client; print\\('OK'\\)\")"
+      "Bash(python -c \"from framework.core.client import Client; print\\('OK'\\)\")",
+      "Bash(python -m pytest tests/ -q)"
     ],
     "additionalDirectories": [
       "c:\\Users\\DYWH\\.claude",
