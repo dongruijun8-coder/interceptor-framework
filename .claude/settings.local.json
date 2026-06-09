@@ -253,7 +253,8 @@
       "Bash(python -c \"from framework.bridge.frida_transport import FridaTransport; from framework.bridge.frida_transport_cli import FridaTransportCli; from framework.bridge.frida_transport_binding import FridaTransportBinding; print\\('All OK'\\)\")",
       "Bash(python -c \"from framework.core.pipeline import Pipeline; print\\('Pipeline OK'\\)\")",
       "Bash(python -m pytest tests/test_template.py tests/test_pagination.py -q)",
-      "Bash(git mv *)"
+      "Bash(git mv *)",
+      "Bash(python -c \"from framework.core.client import Client; print\\('OK'\\)\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\DYWH\\.claude",
