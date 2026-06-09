@@ -9,7 +9,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
 from ..base import EncryptionProcessor
-from framework.bridge.frida_cli import FridaCliSession
+from framework.bridge.frida_transport_cli import FridaTransportCli
 
 
 class AesCbcEncryption(EncryptionProcessor):
@@ -117,9 +117,9 @@ class AesCbcEncryption(EncryptionProcessor):
 
         # ── 2. Launch CLI for frida-rpc messaging (always needed) ──
         if client._messenger.name == "frida-rpc":
-            cli = FridaCliSession()
-            cli.attach(pid, script_path)
-            client._frida_cli_session = cli
+            cli = FridaTransportCli()
+            cli.connect(serial, package, str(script_path))
+            client._frida_transport = cli
             client._notify("info", "Frida CLI 已启动")
 
         # ── 3. Check key cache ──
@@ -134,14 +134,20 @@ class AesCbcEncryption(EncryptionProcessor):
 
         # ── 4. Capture fresh key ──
         # Use shared CLI session if already created, otherwise create new one
-        cli = getattr(client, '_frida_cli_session', None)
+        cli = getattr(client, '_frida_transport', None)
         if cli is None:
-            cli = FridaCliSession()
-            cli.attach(pid, script_path)
-            client._frida_cli_session = cli
+            cli = FridaTransportCli()
+            cli.connect(serial, package, str(script_path))
+            client._frida_transport = cli
 
         client._notify("info", "等待密钥... Frida CLI 已启动")
+
+        # Check after starting CLI: does the script produce a key immediately?
+        # If App already running and hooks installed, key may arrive without tap.
+        print("[aes-cbc] Waiting for KEY_JSON (timeout=30s)...")
+
         key_data = cli.capture_key(timeout=30, tap_helper=serial)
+        print(f"[aes-cbc] capture_key returned: {key_data is not None}")
 
         if not key_data:
             client._notify("error",

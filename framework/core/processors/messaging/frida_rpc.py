@@ -4,7 +4,8 @@ import time
 
 from ..base import MessagingProcessor
 from ...processor_registry import ProcessorRegistry
-from framework.bridge.frida_cli import FridaCliSession, find_frida_binary
+from framework.bridge.frida_transport_cli import FridaTransportCli
+from framework.bridge.frida_cli import find_frida_binary
 from framework.bridge.frida_session import FridaDisconnectedError
 
 
@@ -34,10 +35,10 @@ class FridaRpcMessaging(MessagingProcessor):
                 raise
 
         # 2. Frida CLI session (NIS-bypass: sybl)
-        cli = getattr(client, '_frida_cli_session', None)
+        cli = getattr(client, '_frida_transport', None)
         if cli is not None:
             # Re-attach if CLI died
-            if not cli.is_running:
+            if not cli.is_running():
                 print("[frida-rpc] CLI process dead, re-launching...")
                 rt = client._load_runtime()
                 dev = rt.get("device", {})
@@ -53,7 +54,10 @@ class FridaRpcMessaging(MessagingProcessor):
                             script_path = client.config_path.parent / "frida_key_bridge.js"
                         if script_path.exists():
                             try:
-                                cli.attach(pid, script_path)
+                                transport = FridaTransportCli()
+                                transport.connect(serial, package, str(script_path))
+                                client._frida_transport = transport
+                                return transport.send_message(uid, text)
                             except FileNotFoundError:
                                 return {"success": False, "error": "找不到 frida CLI"}
             return cli.send_message(uid, text)
