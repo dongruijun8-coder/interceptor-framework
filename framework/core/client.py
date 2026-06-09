@@ -1,4 +1,4 @@
-"""BaseClient — 配置驱动 Pipeline，加载处理器链执行"""
+"""Client — 配置驱动 Pipeline，加载处理器链执行"""
 import json
 import threading
 import time
@@ -15,7 +15,7 @@ from .pagination import Paginator
 from .pipeline import Pipeline
 
 
-class BaseClient:
+class Client:
     def __init__(self, config_path: str):
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -330,7 +330,7 @@ class BaseClient:
         if pid:
             return pid
         import subprocess as _subprocess
-        print(f"[base_client] App {package} 未运行，尝试启动...")
+        print(f"[client] App {package} 未运行，尝试启动...")
         _subprocess.run(
             ["adb", "-s", serial, "shell", "monkey", "-p", package, "1"],
             timeout=15, capture_output=True,

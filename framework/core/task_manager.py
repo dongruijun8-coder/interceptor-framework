@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from framework.core.base_client import BaseClient
+from framework.core.client import Client
 
 
 class TaskManager:
@@ -11,7 +11,7 @@ class TaskManager:
         if apps_dir is None:
             apps_dir = Path(__file__).resolve().parent.parent.parent / "apps"
         self.apps_dir = Path(apps_dir)
-        self._tasks: dict[str, BaseClient] = {}
+        self._tasks: dict[str, Client] = {}
         self._discover()
 
     def _discover(self) -> None:
@@ -25,7 +25,7 @@ class TaskManager:
                 continue
             app_id = item.name
             try:
-                client = BaseClient(str(config_file))
+                client = Client(str(config_file))
                 self._tasks[app_id] = client
             except Exception as e:
                 print(f"[TaskManager] 加载 {app_id} 失败: {e}")
@@ -33,7 +33,7 @@ class TaskManager:
     def register(self, app_id: str, config_path: str) -> bool:
         """动态注册新 App（Web 上传后调用）"""
         try:
-            client = BaseClient(config_path)
+            client = Client(config_path)
             self._tasks[app_id] = client
             return True
         except Exception as e:
@@ -91,7 +91,7 @@ class TaskManager:
         task = self._tasks.get(app_id)
         return task.get_stats() if task else None
 
-    def get_task(self, app_id: str) -> Optional[BaseClient]:
+    def get_task(self, app_id: str) -> Optional[Client]:
         return self._tasks.get(app_id)
 
     @property

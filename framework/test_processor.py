@@ -6,10 +6,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from framework.core.base_client import BaseClient
+from framework.core.client import Client
 
 
-def test_encryption(client: BaseClient):
+def test_encryption(client: Client):
     enc = client._encryptor
     print(f"\n[test] encryption/{enc.name}:")
 
@@ -37,7 +37,7 @@ def test_encryption(client: BaseClient):
         print(f"  ✗ 往返测试失败: {e}")
 
 
-def test_signing(client: BaseClient):
+def test_signing(client: Client):
     sig = client._signer
     print(f"\n[test] signing/{sig.name}:")
 
@@ -53,7 +53,7 @@ def test_signing(client: BaseClient):
         print(f"  ✗ 签名失败: {e}")
 
 
-def test_auth(client: BaseClient):
+def test_auth(client: Client):
     auth = client._auth_processor
     print(f"\n[test] auth/{auth.name}:")
 
@@ -71,7 +71,7 @@ def test_auth(client: BaseClient):
         print(f"  ✗ 认证异常: {e}")
 
 
-def test_validate_all(client: BaseClient):
+def test_validate_all(client: Client):
     all_ok = True
     for name, proc in [
         ("encryption", client._encryptor),
@@ -102,7 +102,7 @@ def main():
         print(f"错误: 找不到 config.json ({config_path})")
         sys.exit(1)
 
-    client = BaseClient(str(config_path))
+    client = Client(str(config_path))
 
     if args.category == "encryption":
         test_encryption(client)
