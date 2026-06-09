@@ -25,3 +25,6 @@ Thumbs.db
 # mitmproxy dumps
 *.mitm
 flow/
+
+# 参考/非代码资料
+/参考/
