@@ -1,0 +1,18 @@
+{
+  "credentials": {
+    "uid": "103671347",
+    "deviceId": "5977276a-be8b-301b-9be3-f91c1946536e",
+    "ticket": "288a3936-56b9-42c2-893d-a8ba401e9d63",
+    "phone": "16897286",
+    "password": "336699AaA"
+  },
+  "device": {
+    "serial": "127.0.0.1:7555",
+    "app_package": "com.qiyu.dream",
+    "script_name": "frida_nim_bridge.js"
+  },
+  "settings": {
+    "send_interval": 3
+  },
+  "user_source": "房间榜单"
+}

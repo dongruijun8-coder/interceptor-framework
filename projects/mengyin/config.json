@@ -1,0 +1,169 @@
+{
+  "meta": {
+    "app_name": "mengyin",
+    "package": "com.qiyu.dream",
+    "version": "6.5.7",
+    "config_schema": "2.0"
+  },
+  "frida": {
+    "enabled": true,
+    "device": "usb",
+    "package": "com.qiyu.dream",
+    "script": "frida_nim_bridge.js",
+    "modules": [
+      {
+        "name": "secret_key_spec",
+        "params": {}
+      },
+      {
+        "name": "okhttp",
+        "params": {}
+      },
+      {
+        "name": "messaging_nim",
+        "params": {}
+      }
+    ],
+    "rpc_methods": [
+      "getSessionInfo",
+      "sendMessage",
+      "getStatus"
+    ],
+    "note": "360加固保护主进程。优先 attach com.qiyu.dream:core 进程。cli 模式备选。"
+  },
+  "server": {
+    "base_url": "https://api.sqxs123.com/web",
+    "default_headers": {
+      "User-Agent": "Mozilla/5.0 (Linux; Android 12; SM-S9280 Build/V417IR; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/110.0.5481.154 Mobile Safari/537.36dreamAppAndroid",
+      "X-Requested-With": "com.qiyu.dream",
+      "Referer": "https://api.sqxs123.com//h5/modules/project/index.html",
+      "pub_app": "dream"
+    }
+  },
+  "pipeline": {
+    "encryption": {
+      "plugin": "aes-ecb",
+      "params": {
+        "key": "vt5i9pn9dwxj8na8",
+        "key_size": 128,
+        "two_layer": true,
+        "note": "AES-128-ECB PKCS7. 响应 body 层 + data 层两层解密."
+      }
+    },
+    "signing": {
+      "plugin": "md5-sorted-kv",
+      "params": {
+        "secret_key": "",
+        "excluded_params": [
+          "pub_sign", "pub_uid", "pub_ticket",
+          "appVersion", "appVersionCode", "channel",
+          "deviceId", "ispType", "model", "netType",
+          "os", "osVersion", "app", "ticket",
+          "smDeviceId", "newDeviceId"
+        ],
+        "timestamp_param": "pub_timestamp",
+        "sign_param": "pub_sign",
+        "note": "初始 sign_key 为空字符串。后续从 /login/h5/sign/token 获取后更新 runtime.json。"
+      }
+    },
+    "auth": {
+      "plugin": "plaintext",
+      "note": "ticket + sign_key 由 Frida 动态获取。uid/deviceId/ticket 存在 runtime.json。"
+    },
+    "messaging": {
+      "plugin": "frida-rpc",
+      "params": {
+        "script_name": "frida_nim_bridge.js",
+        "note": "网易NIM SDK via Frida RPC → MsgService.sendMessage()"
+      }
+    }
+  },
+  "endpoints": {
+    "all_rooms": {
+      "path": "/web/allrank/listV2",
+      "method": "GET",
+      "body": {
+        "type": 7,
+        "subType": 1,
+        "page": "{{page}}",
+        "pageSize": 20
+      },
+      "pagination": {
+        "type": "page_number",
+        "size": 20,
+        "stop_on": "empty_list"
+      },
+      "response_path": "data.list",
+      "output_mapping": {
+        "id": "roomId",
+        "name": "roomName"
+      },
+      "note": "type=7 工会房间榜, subType=1 日榜"
+    },
+    "ranking": {
+      "path": "/web/allrank/listV2",
+      "method": "GET",
+      "body": {
+        "roomId": "{{room.id}}",
+        "type": "{{data_source_key}}",
+        "subType": "{{period_key}}",
+        "page": "{{page}}",
+        "pageSize": 20
+      },
+      "pagination": {
+        "type": "page_number",
+        "size": 20,
+        "stop_on": "empty_list"
+      },
+      "response_path": "data.list",
+      "output_mapping": {
+        "uid": "uid",
+        "nick": "nick",
+        "amount": "amount",
+        "avatar": "avatar"
+      },
+      "note": "type=6 财富榜, type=5 魅力榜, type=4 房间榜. subType=1 日/2 周/3 月."
+    },
+    "send_message": {
+      "path": null,
+      "method": "POST",
+      "body": {},
+      "note": "NIM TCP via frida-rpc, 不走 HTTP"
+    }
+  },
+  "user_sources": {
+    "房间榜单": {
+      "endpoint": "ranking",
+      "type": "per_room",
+      "filters": ["data_source", "period"]
+    },
+    "工会榜单": {
+      "endpoint": "all_rooms",
+      "type": "global",
+      "filters": ["data_source", "period"],
+      "note": "type=7 工会房间全局榜单"
+    }
+  },
+  "runtime_config": {
+    "data_sources": {
+      "财富榜": 6,
+      "魅力榜": 5,
+      "房间榜": 4,
+      "工会榜": 7
+    },
+    "periods": {
+      "日榜": 1,
+      "周榜": 2,
+      "月榜": 3
+    },
+    "genders": {
+      "全部": null,
+      "男": 1,
+      "女": 2
+    },
+    "templates": [
+      "小哥哥，来我房间玩玩嘛~",
+      "老板，我在{room_name}等你哦～"
+    ]
+  }
+}
