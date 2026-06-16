@@ -29,3 +29,7 @@ flow/
 # 参考/非代码资料
 /参考/
 tools/frida-server-*
+
+# 本地配置
+.claude/settings.local.json
+.codegraph/daemon.pid
