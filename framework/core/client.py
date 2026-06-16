@@ -47,6 +47,10 @@ class Client:
         self.session = requests.Session()
         self.session.verify = False
 
+        # Default headers & base URL — must init BEFORE HttpClient
+        self._default_headers = self.config.get("server", {}).get("default_headers", {}).copy()
+        self._base_url = self.config.get("server", {}).get("base_url", "")
+
         # HttpClient — extracted transport layer
         from .http import HttpClient
         self.http = HttpClient(
