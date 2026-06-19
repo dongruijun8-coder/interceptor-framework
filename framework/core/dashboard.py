@@ -22,7 +22,7 @@ SPEC_DIR = (Path(__file__).resolve().parent.parent.parent
 HOMEPAGE_HTML = SPEC_DIR / "homepage.html"
 DETAIL_HTML = SPEC_DIR / "design-mockup.html"
 
-APPS_DIR = Path(__file__).resolve().parent.parent.parent / "apps"
+APPS_DIR = Path(__file__).resolve().parent.parent.parent / "projects"
 
 ALLOWED_CONFIG_SCHEMAS = ["1.0", "2.0"]
 

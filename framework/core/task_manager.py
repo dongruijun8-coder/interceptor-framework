@@ -1,4 +1,4 @@
-"""多 App 任务调度 — 从 apps/ 读取 config.json 发现 App"""
+"""多 App 任务调度 — 从 projects/ 读取 config.json 发现 App"""
 import json
 from pathlib import Path
 from typing import Optional
@@ -9,7 +9,7 @@ from framework.core.client import Client
 class TaskManager:
     def __init__(self, apps_dir: str = None):
         if apps_dir is None:
-            apps_dir = Path(__file__).resolve().parent.parent.parent / "apps"
+            apps_dir = Path(__file__).resolve().parent.parent.parent / "projects"
         self.apps_dir = Path(apps_dir)
         self._tasks: dict[str, Client] = {}
         self._discover()

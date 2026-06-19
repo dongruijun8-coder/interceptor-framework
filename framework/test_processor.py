@@ -97,7 +97,7 @@ def main():
                         default="all", help="Processor category to test")
     args = parser.parse_args()
 
-    config_path = Path(__file__).resolve().parent.parent / "apps" / args.app / "config.json"
+    config_path = Path(__file__).resolve().parent.parent / "projects" / args.app / "config.json"
     if not config_path.exists():
         print(f"错误: 找不到 config.json ({config_path})")
         sys.exit(1)
